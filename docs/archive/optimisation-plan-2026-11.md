@@ -1,3 +1,5 @@
+> **Archived 2026-11-27.** This is the record of optimisation steps 1–6 (decisions, results, checks). The live plan is [`docs/roadmap.md`](../roadmap.md).
+
 # TCZ design optimisation — plan
 
 Goal: find the cheapest set of TCZ interventions with zero breaches of the zone over 50 years, and
