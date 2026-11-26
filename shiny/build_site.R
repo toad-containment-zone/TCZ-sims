@@ -1,5 +1,9 @@
 # build_site.R
 #
+# LEGACY / FALLBACK: the deployed forecast site is now the static JavaScript
+# version in shiny/web/ (see TCZ-sims/CLAUDE.md). This script still builds the
+# original shinylive version of app.R, but nothing deploys it.
+#
 # Export the Shiny app to a self-contained shinylive site under shiny/site/.
 # The result is plain static files (HTML + JS + wasm) that run the app entirely
 # in the visitor's browser via webR -- no R process, no Shiny Server. Serve it
