@@ -35,6 +35,12 @@ names(tcz.costs) <- tolower(make.names(names(tcz.costs)))
 ## Fence lengths for long fencing areas
 fence.lengths <- readxl::read_xlsx(path = file.path(data.dir, "optimisation-data/Draft QRA data - Fencing unit rates.xlsx"),
                                sheet = "fence-lengths")
+# eradication: a fence's erad.units (crews of two + quad bike needed to cover it in a night) times the
+# cost per erad-unit per night; one response = one night (assumption, 2026-11-27)
+erad.sheet <- readxl::read_xlsx(path = file.path(data.dir, "optimisation-data/Draft QRA data - Fencing unit rates.xlsx"),
+                                sheet = "eradication-costs-per-erad-unit")
+erad.cost.per.unit <- erad.sheet$`cost-per erad-unit`[erad.sheet$Item %in% "Total-cost-per-erad-unit"]
+stopifnot(length(erad.cost.per.unit) == 1, erad.cost.per.unit > 0, !anyNA(fence.lengths$erad.units))
 
 # merge costs to infrastructure
 tcz.sites <- tcz.sites |>

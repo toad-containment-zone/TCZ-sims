@@ -2,11 +2,11 @@
 #
 # Optimises the TCZ design (ms/tcz-optimisation-methods.qmd, "Cost optimisation"):
 # With the extreme-wet-year kernel (rain-years.R), natural-point drying (drying-model.R) and fence
-# eradication responses counted.
-#   1. do-nothing counterfactual (every intervention removed) and full design, 100 full-horizon runs each
-#   2. backward greedy search (most expensive first, 20 runs per test) + 100-run confirmation,
-#      restoring removed units in reverse order while the confirmation finds breaches
-#   3. optimised design, 100 full-horizon runs; breach probability, point-years avoided, cost and CE
+# eradication responses costed per fence (erad.units x $ per erad-unit night, load-data.R).
+#   1. do-nothing counterfactual (every intervention removed) and full design, 1,000 full-horizon runs each
+#   2. backward greedy search (most expensive first, 100 runs per test) + 1,000-run confirmation,
+#      restoring the best-value removed unit while the confirmation finds breaches
+#   3. optimised design, 1,000 full-horizon runs; breach probability, point-years avoided, cost and CE
 # Outputs go to out/optimisation/.
 #
 # Set SMOKE <- TRUE before sourcing to check the plumbing quickly (5 candidates, tiny run counts).
@@ -19,12 +19,11 @@ source("src/tcz-sims/optimise-functions.R")
 out.dir <- if (SMOKE) "out/optimisation/smoke" else "out/optimisation"
 dir.create(out.dir, recursive = TRUE, showWarnings = FALSE)
 
-n.eval    <- if (SMOKE) 4 else 100 # full-horizon evaluation runs per design
-n.screen  <- if (SMOKE) 2 else 20
-n.confirm <- if (SMOKE) 4 else 100
+n.eval    <- if (SMOKE) 4 else 1000 # full-horizon evaluation runs per design
+n.screen  <- if (SMOKE) 2 else 100
+n.confirm <- if (SMOKE) 4 else 1000 # "0 in 1,000" bounds the breach risk at about 0.3%
 max.cand  <- if (SMOKE) 5 else Inf
 seed      <- 20261126
-eradication.cost <- 0 # $ per fence eradication response; no figure yet
 
 st <- spread.table
 tcz.rows <- !is.na(tcz.units.sim$unit_id)
@@ -37,8 +36,9 @@ stopifnot(identical(apply_design(st, none), st),
 summarise_design <- function(name, ev, remove) {
   data.frame(design = name,
              units.retained = sum(tcz.rows & !remove),
-             cost = design_cost(tcz.units.sim, remove, eradication.cost = eradication.cost,
-                                eradication.events = mean(ev$n.erad)),
+             capital = design_cost(tcz.units.sim, remove),
+             erad.cost = mean(ev$erad.cost),
+             cost = design_cost(tcz.units.sim, remove, eradication = mean(ev$erad.cost)),
              erad.events = mean(ev$n.erad),
              runs = nrow(ev),
              breaches = sum(ev$breach),
@@ -49,7 +49,7 @@ summarise_design <- function(name, ev, remove) {
 }
 eval_full <- function(remove, seed.offset) {
   eval_design(apply_design(st, remove), pairs, n.eval, stop.on.target = FALSE,
-              seed = seed + seed.offset, tcz.rows = tcz.rows,
+              seed = seed + seed.offset, tcz.rows = tcz.rows, erad.cost.row = erad.cost.row,
               pairs.extreme = pairs.extreme, extreme.ref = rain.years$ref$extreme,
               drying.spec = drying.spec)
 }
@@ -66,7 +66,7 @@ cat("Greedy search...\n")
 greedy <- greedy_backward(st, pairs, tcz.units.sim, n.screen = n.screen, n.confirm = n.confirm,
                           seed = seed, max.candidates = max.cand,
                           pairs.extreme = pairs.extreme, extreme.ref = rain.years$ref$extreme,
-              drying.spec = drying.spec)
+                          drying.spec = drying.spec, restore = "best")
 
 ######## 3. optimised design ########
 cat("Optimised design...\n")

@@ -23,7 +23,7 @@
 #   4. candidate = cost > 0: only units with a cost are ever removed by the greedy optimiser.
 #
 # Inputs:  tcz.sites (sf, the audit, with X_record_id/name_of_site/X_status),
-#          costs (ParentID + Cost/Site), fence.lengths (Site.ID/Fence/distance/n.gates)
+#          costs (ParentID + Cost/Site), fence.lengths (Site.ID/Fence/distance/n.gates/erad.units)
 # Output:  sf POINT (Albers, EPSG:3577) with one row per unit.
 
 library(sf)
@@ -82,6 +82,7 @@ build_tcz_units <- function(tcz.sites, costs, fence.lengths, enclosures = fence.
   fence.row <- match(sites$X_record_id, fence.lengths$Site.ID)
   sites$fence.distance <- fence.lengths$distance[fence.row]
   sites$fence.gates <- fence.lengths$n.gates[fence.row]
+  sites$fence.erad.units <- fence.lengths$erad.units[fence.row]
 
   units <- sites |>
     st_drop_geometry() |>
@@ -96,6 +97,7 @@ build_tcz_units <- function(tcz.sites, costs, fence.lengths, enclosures = fence.
       control.type = if (any(!is.na(fence.distance))) "fence" else "tank",
       distance = if (any(!is.na(fence.distance))) sum(fence.distance, na.rm = TRUE) else NA_real_,
       n.gates = if (any(!is.na(fence.gates))) sum(fence.gates, na.rm = TRUE) else NA_real_,
+      erad.units = if (any(!is.na(fence.erad.units))) sum(fence.erad.units, na.rm = TRUE) else NA_real_,
       X = mean(x[locates]),
       Y = mean(y[locates]),
       .groups = "drop"

@@ -7,7 +7,7 @@ report cost-effectiveness (toad point-years avoided per dollar), as described in
 This is the overall plan. Each step gets a detailed plan (a section under "Detailed step plans")
 when we start it, and this file is updated as steps change or finish.
 
-## Where we are (2026-11-26)
+## Where we are (2026-11-27)
 
 - **Built:** the control step in `spread.pilb()` (`src/pprocess_functions.R`):
   - natural points dry out via `surv.prob`, or a per-year `drying.matrix`;
@@ -22,7 +22,9 @@ when we start it, and this file is updated as steps change or finish.
 - **Built, but separate from the simulation:** `dea-drying-probs.R` → `rainfall-drying-model.R`
   (`fit_drying`, `predict_drying()`).
 - **Data:** the drying survey's per-point answers are in the updated Living Waters layer (`group_assessment`), loaded in step 2 but not yet used.
-- **Baseline:** `out/tcz-full.*` was regenerated in step 1 (2026-11-26) with tanks and fences in the run.
+- **Baseline:** `out/tcz-full.*` was last regenerated in step 6 (2026-11-27) with the final code.
+- **All six steps are done.** The final design and its numbers are under "Step 6" below. The open
+  questions that could still change them are listed under "Open questions".
 
 ## Steps
 
@@ -64,7 +66,7 @@ when we start it, and this file is updated as steps change or finish.
    - Build the waterpoint × year drying matrix (a 25-year rainfall reference, repeated to 50
      years) and pass it to `run_sims(drying.matrix=)`.
    - Carry the uncertainty through by drawing a calibration sample for each run.
-6. **Final runs and write-up.**
+6. **Final runs and write-up.** ✅ Done 2026-11-27 (see below).
    - Merge `main` into the branch. It will conflict with main's removal of the old Shiny app in
      `shiny/`.
    - Run the final optimisation.
@@ -72,13 +74,13 @@ when we start it, and this file is updated as steps change or finish.
 
 ## Open questions
 
-- **Costs:** are there maintenance costs, or a cost per eradication response? The cost sheet has
-  only `Cost/Site`. Until there are, these are parameters that default to 0.
+- **Costs:** eradication responses are costed from step 6 (one night per response, an
+  assumption to confirm). Maintenance costs are still 0: are there any?
 - **Uncosted works:** "Erin B yards" and "Refuse tip" have works planned but no cost, so they are
   fixed points. Five more uncosted records sit in units that do have a cost. Two cost rows ("Two
   tree well", "Sea Ranger base", $20k each) match no audit record and are excluded.
 - **Gates:** `fence-lengths` already has `n.gates` for all 8 fenced areas. Confirm that's complete.
-- **Follow-up: is the Kimberley calibration still valid with SILO rainy days?** λ
+- **Follow-up (now Future work 1): is the Kimberley calibration still valid with SILO rainy days?** λ
   (`dat/Posteriors_2026.RData`) was fitted by ABC (`src/ABC/`) using rainy days from the
   Kimberley point data's `ndays_1` column, not SILO (its source isn't checked yet). The TCZ runs
   now take rainy days from SILO, which counts about 50% more than the rainfall raster at the TCZ
@@ -87,6 +89,34 @@ when we start it, and this file is updated as steps change or finish.
   calibrated λ implies. First check: compare `ndays_1` with SILO at the Kimberley points. Possible fixes: refit the ABC with SILO rainy days for the
   Kimberley points, or rescale SILO to the calibration source. (Flagged by the project lead,
   2026-11-26.)
+
+## Future work (flagged by the project lead, 2026-11-27)
+
+These come after the optimisation and are in this order, because each depends on the one before.
+
+1. **Refit the Kimberley calibration on SILO rainy days.** SILO counts about 50% more rainy days
+   than the BoM raster at the TCZ points (42.6 against 28.3, r = 0.90). λ
+   (`dat/Posteriors_2026.RData`) was fitted by ABC (`src/ABC/spread_Kimberley_ABC*.R`) with the
+   Kimberley points' `ndays_1`, so the TCZ runs, which now use SILO, move toads further each year
+   than the calibration assumed.
+   - Refit with SILO rainy days at the Kimberley points, using the same source as `rain-years.R`,
+     so that the parameters carry over to the TCZ.
+   - This replaces the "is the Kimberley calibration still valid?" open question above.
+2. **Switch the colonisation threshold back to c ≥ 2 in the same refit.** Two arrivals are enough
+   to found a population, so ≥ 2 makes more biological sense.
+   - The code uses `realised_n > 2` (`pprocess_functions.R`, `spread.pilb()`). The methods
+     describe it as c > 2 for now, to match the current results.
+   - `spread.pilb()` is shared by the ABC fit, the TCZ runs and `forecast.R`. Change it only
+     together with the refit, because λ was calibrated under the current threshold.
+   - Then update the methods (simulation model and fence-failure text) and re-run the
+     optimisation.
+3. **Thread the refit into the annual forecast (`forecast.R`).**
+   - Use the new posteriors, and SILO mean rainy days in place of the raster
+     (`rain.id = "rainfall"`).
+   - Add inter-annual rainfall variation as the optimisation runs do (`rain-years.R`): a random
+     start year in the reference period per run, the extreme-wet-year kernel in the top 20% of
+     years, and the natural-point drying matrix where it applies.
+   - Then regenerate the public forecast site (`shiny/prep_app_data.R` → `shiny/web/`).
 
 ## Detailed step plans
 
@@ -419,3 +449,88 @@ Results:
 - Drying cuts natural point-years by about 20%, but the 10 "Always Wet" points inside the TCZ
   stay permanent stepping stones. The design changes little from step 4 (one more tank, U006,
   removed).
+
+### Step 6 — final runs and write-up
+
+Decisions (project lead, 2026-11-27):
+- **Restoration rule: best value.** While the confirmation finds breaches:
+  - replay the breaching runs (same run numbers, so the same random streams) once for each unit
+    still removed, with that unit restored;
+  - restore the unit that fixes the most breaches per capital dollar (ties: cheaper, then
+    `unit_id`);
+  - if no single unit fixes any breach, restore the most recently removed one ("fallback");
+  - re-confirm.
+
+  `greedy_backward(restore = "reverse")` keeps the old rule.
+- **Run sizes:** 100 runs per screening test, a 1,000-run confirmation, and 1,000-run evaluations
+  of each design. "0 in 1,000" bounds the breach risk at about 0.3%.
+- **Eradication costs** (added by the project lead to "Draft QRA data - Fencing unit rates.xlsx"):
+  - each fence has `erad.units` (two-person crews with a quad bike needed to cover it in a
+    night): Shelemar 8, Shamrock Gardens 2, Shamrock Stn Homestead 1, the others 0.5;
+  - an erad-unit costs $1,800 a night (personnel $1,400, quad bike $150, vehicle $250);
+  - **one response = one night** is my assumption, still to confirm.
+
+Changes:
+- Merged `main` (`59da87c`): the static forecast site replaces the Shiny app. The conflicts were
+  in `CLAUDE.md` and `.gitignore`.
+- `optimise-functions.R`:
+  - `eval_design(runs=)` replays chosen run numbers;
+  - `eval_design(erad.cost.row=)` returns each run's eradication cost, fence by fence;
+  - `greedy_backward(restore=)`, with `restorations.csv` gaining `rule`, `breaches.fixed` and
+    `n.tested`;
+  - `design_cost(eradication=)` takes the run-mean eradication cost.
+- `load-data.R` reads the eradication sheet. `build-tcz-units.R` carries `erad.units` onto the
+  fence units, and `tcz-setup.R` builds `erad.cost.row`.
+- `tcz-optimise.R`: runs at 100 / 1,000 / 1,000, with the summary split into capital, eradication
+  and total cost.
+- Methods:
+  - best-value restoration, the run sizes, the independent final evaluation and eradication
+    costing;
+  - filled the telemetry counts (67 toads with at least 5 turning angles, so 670,000 d*ₙ per n)
+    and the Tingley 2013, DEA (Krause et al. 2021) and SILO (Jeffrey et al. 2001) citations;
+  - corrected the colonisation threshold to c > 2, as in the code. Line 16 still said ≥ 2.
+  - The PDF renders (`ms/output/ms/`, gitignored).
+
+Checks:
+- Demo checks A–F pass.
+- With `restore = "reverse"` at step 5's sizes and seed, the code gives exactly step 5's design
+  (U001–U006 removed, 32 restorations).
+- Forcing step 5's 38 screened removals and applying best-value restoration put back 16 units
+  ($1.87M), against reverse order's 32 ($2.75M).
+
+Results (2026-11-27, 7.0 min on 8 cores):
+
+| Design | Units kept | Capital | Eradication | Total cost | Breaches /1000 (95% upper) | Point-years avoided | CE (avoided per $M) | Eradications / run |
+|---|---|---|---|---|---|---|---|---|
+| Do nothing | 0 | $0 | $0 | $0 | 1000 | — | — | 0 |
+| Full | 261 | $16.52M | $0.88M | $17.40M | 0 (0.37%) | 17,748 | 1,020 | 141 |
+| Optimised | 244 | $12.41M | $0.11M | $12.52M | **1** (0.56%) | 17,408 | 1,391 | 103 |
+
+- The screening removed 23 units (2 fences, 21 tanks). The confirmation found 38/1000 breaches.
+  Best-value restoration put back 6 units ($0.84M): U042, U159, U010, U009, U060 and U006. It
+  reached 0/1000 after six rounds.
+- **The final design removes 17 units, saving $4.12M capital ($4.88M total):**
+  - the Shelemar (U001) and Shamrock Gardens (U002) fences;
+  - 15 tanks: U003, U004, U008, U022, U026, U039, U069, U071, U120, U121, U123, U136, U158, U161,
+    U190.
+- The independent 1,000-run evaluation found **1 breach** (p ≈ 0.001, 95% upper 0.56%). That is
+  consistent with the confirmation's 0/1000, and the residual risk is far below step 5's
+  (1/100).
+- Removing the two big fences removes most of the eradication cost ($0.88M → $0.11M), because
+  Shelemar and Shamrock Gardens cost 8 and 2 erad-units per response.
+- **Sensitivity to nights per response** (eradication cost scaled post hoc; the design is
+  unchanged, since the screening order uses capital cost):
+
+  | Nights per response | Full: cost, CE | Optimised: cost, CE |
+  |---|---|---|
+  | 1 | $17.40M, 1,020 | $12.52M, 1,391 |
+  | 3 | $19.16M, 926 | $12.74M, 1,366 |
+  | 5 | $20.92M, 848 | $12.97M, 1,343 |
+
+Still open for the write-up (methods):
+- the Geoscience Australia dataset names ("XX and YY") and the "step out details";
+- the soak count (XX);
+- full references for Dunlop et al., Brown et al. and Phillips, Dempster et al.;
+- the year for "Southwell et al. (2016)": the J. Appl. Ecol. paper is in the 2017 volume;
+- the telemetry years: the text says 2006–8, but the January–March fixes in `gregsData.txt` run
+  2005–2010.

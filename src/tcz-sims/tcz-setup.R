@@ -121,4 +121,7 @@ stopifnot(all(drying.spec$class[spread.table[, "nats"] == 0] == "never")) # only
 
 # unit metadata aligned row-for-row with spread.table (NA rows = not a TCZ unit), for the optimiser
 tcz.units.sim <- st_drop_geometry(tcz.units)[match(sim.unit, tcz.units$unit_id),
-                                             c("unit_id", "cost", "candidate", "control.type")]
+                                             c("unit_id", "cost", "candidate", "control.type", "erad.units")]
+# $ per eradication response at each spread.table row (fences only; 0 elsewhere)
+erad.cost.row <- ifelse(tcz.units.sim$control.type %in% "fence", tcz.units.sim$erad.units * erad.cost.per.unit, 0)
+stopifnot(!anyNA(erad.cost.row), all(erad.cost.row[tcz.units.sim$control.type %in% "fence"] > 0))
