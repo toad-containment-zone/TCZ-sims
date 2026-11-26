@@ -425,7 +425,8 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
   fence.area <- if (!is.null(fence.area.id)) pData[[fence.area.id]] else rep(NA_real_, n.pts)
   r.eff <- ifelse(control.type==CONTROL_FENCE & !is.na(fence.area), sqrt(fence.area/pi), NA_real_)
 
-  # fence breach probability, from km-of-fenceline + gate count ("g" in the qmd)
+  # per-toad fence breach probability, from km-of-fenceline + gate count ("g" in the qmd);
+  # arrivals at an uncolonised fence are thinned to Binom(c, p.breach) in spread.pilb()
   fence.units <- if (!is.null(fence.units.id)) pData[[fence.units.id]] else rep(0, n.pts)
   fence.units[is.na(fence.units)] <- 0
   p.breach <- ifelse(control.type==CONTROL_FENCE, 1-(1-fence.breach.rate)^(fence.units/4), 0)
@@ -552,15 +553,16 @@ spread.pilb<-function(pop, gens, pairs, delta, r, plot=FALSE, rollup,
       if(failures<0) failures<-0 # catches the approximately statement (primarily happens at large r)
       expected_n <- c(expected_n, failures) # add failures
       realised_n <- rmultinom(1, gma, expected_n)[-length(expected_n)] # draw propagules
-      if (control.step){ # fence's own stopping power thins arrivals at not-yet-colonised fenced points
+      if (control.step){ # fence's own stopping power thins arrivals at not-yet-colonised fenced points:
+        # p.breach is the per-toad probability of getting through, so c* ~ Binom(c, p.breach) (see qmd)
         fence.uncol <- is.fence & !pres.before
-        if (any(fence.uncol)) realised_n[fence.uncol] <- rbinom(sum(fence.uncol), size=realised_n[fence.uncol], prob=1-pop[fence.uncol,"p.breach"])
+        if (any(fence.uncol)) realised_n[fence.uncol] <- rbinom(sum(fence.uncol), size=realised_n[fence.uncol], prob=pop[fence.uncol,"p.breach"])
       }
       colonised <- realised_n > 2
     }else {
       if (control.step){
         fence.uncol <- is.fence & !pres.before
-        if (any(fence.uncol)) expected_n[fence.uncol] <- expected_n[fence.uncol]*(1-pop[fence.uncol,"p.breach"])
+        if (any(fence.uncol)) expected_n[fence.uncol] <- expected_n[fence.uncol]*pop[fence.uncol,"p.breach"] # expected-value analogue of the Binom thinning above
       }
       colonised <- expected_n > 2
     }

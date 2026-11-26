@@ -37,7 +37,8 @@ all.points <- all.points |>
       TRUE                                          ~ "none"  # natural, or outside TCZ
     ),
     fence.units = coalesce(distance, 0) / 1000 + coalesce(n.gates, 0), # distance is metres -> km, + gate count
-    fence.area = if_else(control.type == "fence", (distance / 4)^2, NA_real_) # distance = full perimeter (m); assume square -> side = distance/4, area = side^2
+    fence.area = if_else(control.type == "fence", (distance / 4)^2, NA_real_), # distance = full perimeter (m); assume square -> side = distance/4, area = side^2
+    art_nat = as.integer(!origin_des) # setup() wants 1 = artificial, 0 = natural (natural points get the drying test)
   ) |>
   rename(TCZ = inside_tcz) # to match required name in setup()
 
@@ -75,12 +76,12 @@ setup(point.data = all.points,
       X.id = "X", 
       Y.id = "Y",
       present.id = "colonised",
-      artificial.natural.id = "origin_des",
+      artificial.natural.id = "art_nat",
       rain.id = "rainfall",
       threshold = 100,
       constant.rain = NULL,
       trunc.dist = TRUE,
-      TCZ = TRUE,
+      TCZ = FALSE, # keep TCZ artificial points in: they're modelled as tanks/fences via the control step, not removed
       control.type.id = "control.type",
       fence.area.id = "fence.area",
       fence.units.id = "fence.units")
@@ -88,7 +89,8 @@ setup(point.data = all.points,
 # write out points for basemapping
 write.csv(spread.table, file = "out/basemap_points.csv", row.names = FALSE)
 # run sims..
-sim_out <- run_sims(n.sims = 100, gens = 50, plot = FALSE, rollup = FALSE, control.step = TRUE)
+# stop.on.target = FALSE runs the full 50 years after any breach, so point-years occupied are counted over the whole horizon
+sim_out <- run_sims(n.sims = 100, gens = 50, plot = FALSE, rollup = FALSE, control.step = TRUE, stop.on.target = FALSE)
 save_outputs(output = sim_out,
              path = "out",
              scenario.name = scen.name,

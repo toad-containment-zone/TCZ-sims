@@ -9,7 +9,9 @@
 #   B. Attrition: with control.step=TRUE, tank/fence points go extinct at their expected annual
 #      rates (1%/5%) and natural points (default surv.prob=1) never do.
 #   C. Fence breach-thinning: fenced target points (r.eff == r, isolating p.breach's effect) get
-#      colonised less often than otherwise-identical unfenced targets at the same distance.
+#      colonised less often than otherwise-identical unfenced targets at the same distance, by
+#      about the amount Binom(c, p.breach) thinning predicts. Uses a realistic, small p.breach
+#      (~0.1) so that thinning in the wrong direction (by 1 - p.breach) fails the check.
 
 source("src/pprocess_functions.R")
 set.seed(20260730)
@@ -81,23 +83,29 @@ n.targets <- 30
 angles <- seq(0, 2*pi, length.out = n.targets*2 + 1)[seq_len(n.targets*2)]
 dist.to.seed <- 1000
 
+# fence_units = 8.2 (km + gates) gives p.breach = 1-(1-0.05)^(8.2/4) ~ 0.10. Fenced points get
+# control_fail_prob = 1 (a breached fence is never eradicated), so the end-of-generation control
+# step can't knock them back and the comparison measures breach-thinning alone.
+fence.units.C <- 8.2
 seed.pt      <- data.frame(X = 0, Y = 0, control_type = "none", art_nat = 1, present = 1,
-                           fence_area = NA, fence_units = 0)
+                           fence_area = NA, fence_units = 0, control_fail_prob = NA)
 unfenced.pts <- data.frame(X = dist.to.seed*cos(angles[1:n.targets]),
                             Y = dist.to.seed*sin(angles[1:n.targets]),
                             control_type = "none", art_nat = 1, present = 0,
-                            fence_area = NA, fence_units = 0)
+                            fence_area = NA, fence_units = 0, control_fail_prob = NA)
 fenced.pts   <- data.frame(X = dist.to.seed*cos(angles[(n.targets+1):(2*n.targets)]),
                             Y = dist.to.seed*sin(angles[(n.targets+1):(2*n.targets)]),
                             control_type = "fence", art_nat = 1, present = 0,
-                            fence_area = pi*r^2, fence_units = 54) # r.eff == r, p.breach ~ 0.5
+                            fence_area = pi*r^2, fence_units = fence.units.C, # r.eff == r
+                            control_fail_prob = 1)
 
 breach.data <- rbind(seed.pt, unfenced.pts, fenced.pts)
 
 setup(point.data = breach.data,
       X.id = "X", Y.id = "Y", present.id = "present", artificial.natural.id = "art_nat",
       remove_duplicates = FALSE, constant.rain = 100, TCZ = FALSE,
-      control.type.id = "control_type", fence.area.id = "fence_area", fence.units.id = "fence_units")
+      control.type.id = "control_type", fence.area.id = "fence_area", fence.units.id = "fence_units",
+      control.fail.prob.id = "control_fail_prob")
 breach.table <- spread.table
 breach.pairs <- pairs
 p.breach.val <- unique(breach.table[breach.table[,"control.type"]==CONTROL_FENCE, "p.breach"])
@@ -121,10 +129,18 @@ for (rr in seq_len(n.reps)) {
 }
 cat(sprintf("Unfenced target colonisation rate: %.3f\n", mean(unfenced.col)))
 cat(sprintf("Fenced target colonisation rate:   %.3f\n", mean(fenced.col)))
-cat(sprintf("(fenced rate reflects two compounding effects, both measured within this same generation:\n"))
-cat(sprintf(" breach-thinning reduces arrivals by ~(1 - p.breach) = %.3f, and any point that does get\n", 1 - p.breach.val))
-cat(sprintf(" colonised still faces the recurring control.fail.prob=0.05 eradication test immediately;\n"))
-cat(sprintf(" combined, the fenced rate should be roughly (1-p.breach)*0.05 = %.4f of the unfenced rate)\n", (1-p.breach.val)*0.05))
+# Expected rates, from the same multinomial-then-threshold logic: each target's arrivals are
+# ~Poisson(m) for some m, unfenced colonised when > 2 arrive, fenced when > 2 of Binom(n, p.breach)
+# get through, i.e. ~Poisson(m * p.breach). Back out m from the observed unfenced rate.
+pois.gt2 <- function(m) 1 - ppois(2, m)
+m.hat <- uniroot(function(m) pois.gt2(m) - mean(unfenced.col), c(1e-6, 1e4))$root
+exp.right <- pois.gt2(m.hat * p.breach.val)       # thinning by p.breach (intended)
+exp.wrong <- pois.gt2(m.hat * (1 - p.breach.val)) # thinning by 1 - p.breach (the old bug)
+cat(sprintf("Expected fenced rate if thinned by p.breach:     %.3f\n", exp.right))
+cat(sprintf("Expected fenced rate if thinned by 1 - p.breach: %.3f\n", exp.wrong))
+stopifnot(abs(mean(fenced.col) - exp.right) < abs(mean(fenced.col) - exp.wrong),
+          mean(fenced.col) < 0.5 * mean(unfenced.col))
+cat("Breach-thinning direction check passed\n")
 
 # age==0 iff first.col.gen is NA holds for any point never yet colonised (using the last rep's result,
 # which always has some never-colonised target points since colonisation isn't certain)

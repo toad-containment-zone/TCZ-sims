@@ -22,11 +22,11 @@ when we start it, and this file is updated as steps change or finish.
 - **Built, but separate from the simulation:** `dea-drying-probs.R` → `rainfall-drying-model.R`
   (`fit_drying`, `predict_drying()`).
 - **Data:** the Traditional Owner drying survey data has arrived (2026-11) but isn't loaded yet.
-- **Stale:** `out/tcz-full.*` (31 Jul) predates the fence work.
+- **Baseline:** `out/tcz-full.*` was regenerated in step 1 (2026-11-26) with tanks and fences in the run.
 
 ## Steps
 
-1. **Fix fence thinning; re-run the full-implementation baseline.**
+1. **Fix fence thinning; re-run the full-implementation baseline.** ✅ Done 2026-11-26 (see below).
    - `pprocess_functions.R:557,563` let arrivals through a fence with probability `1 - p.breach`.
      The methods say `c* ~ Binom(p_b, c)`. Fix the code, and extend `control-step-demo.R` so it
      would catch this.
@@ -79,4 +79,62 @@ when we start it, and this file is updated as steps change or finish.
 
 ## Detailed step plans
 
-_(added as each step starts)_
+### Step 1 — fence thinning fix and baseline re-run
+
+Findings:
+- `spread.pilb()` thins arrivals at a not-yet-colonised fence with `prob = 1 - p.breach` (in both
+  the multinomial branch and the expected-value branch). `p.breach` is the chance that one toad
+  gets through, so the fence currently stops only a fraction `p.breach` of arrivals. For a typical
+  fence (2.3 km + 3 gates, g = 5.3) `p.breach` ≈ 0.07, so 93% of toads get through instead of 7%.
+- `control-step-demo.R` test C uses `fence_units = 54`, which gives `p.breach` ≈ 0.5. At 0.5 the
+  two directions give the same result, so the test can't catch the bug. Its printed explanation
+  also assumes `1 - p.breach`.
+- The `realised_n > 2` threshold has been in the code since the matrix rewrite (`fdec393`,
+  2024-05). It applies to every point and was in place for the λ calibration, so it stays. The
+  methods text changes to match.
+
+Changes:
+1. `src/pprocess_functions.R`: thin with `prob = p.breach` (and `expected_n * p.breach`). Correct
+   the comments in `setup()`/`spread.pilb()` that describe the thinning.
+2. `src/tcz-sims/control-step-demo.R` test C: use a realistic, asymmetric fence (`p.breach` ≈ 0.1).
+   Add a `stopifnot()` that fails when the thinning goes the wrong way: the fenced colonisation
+   rate must be well below the unfenced rate. Fix the printed explanation.
+3. `ms/tcz-optimisation-methods.qmd`: "failed when $c_i \geq 2$" → failed when
+   $c^*_i > 2$ (at least three colonists, the same threshold as every other point).
+4. `src/tcz-sims/tcz-sims.R`: `run_sims(..., stop.on.target = FALSE)`, so the baseline runs the
+   full 50 years and records point-years.
+5. Run `control-step-demo.R`, then `tcz-sims.R` (100 runs × 50 years). Record in this file how
+   often the full design is breached, and the mean point-years occupied.
+
+Done when: the demo passes and would fail on the old code; `out/tcz-full.*` is regenerated; and
+the baseline numbers are written here.
+
+**Done (2026-11-26).**
+- Thinning fixed. Demo test C now uses `p.breach` = 0.10 and switches off the fence
+  persistence test (`control_fail_prob = 1`), so it measures thinning alone.
+  - With the fix: unfenced 0.547, fenced 0.003 (predicted 0.003).
+  - On the old code: fenced 0.475, and the check fails as it should.
+- **Second bug found and fixed in `tcz-sims.R`.** `setup()` reads the natural/artificial column as
+  1 = artificial, 0 = natural. `tcz-sims.R` passed `origin_des == "Natural"`, which is the
+  opposite, together with `TCZ = TRUE`. As a result:
+  - every artificial point inside the TCZ was removed, so tanks and fences were never simulated
+    (the 31 Jul `tcz-full` run was really the old "remove all artificial water" scenario);
+  - natural points were flagged as artificial, so they would never have dried in step 5.
+
+  Now `tcz-sims.R` passes `art_nat = !natural` with `TCZ = FALSE`. `forecast.R` is unaffected,
+  because the flag is only used by the control step. The convention is corrected in `CLAUDE.md`.
+- **Baseline: full implementation** (100 runs × 50 years, `stop.on.target = FALSE`,
+  natural points never dry):
+
+  | | |
+  |---|---|
+  | Points in run | 727: 286 inside the TCZ (259 tanks, 8 fences, 19 natural), 82 targets |
+  | Breaches | **0 / 100** |
+  | Point-years occupied, all points | mean 16,298 (almost all from points already colonised north of the TCZ) |
+  | Point-years occupied, inside the TCZ | mean 441 (range 54–758): natural 410, tank 25, fence 6 |
+  | TCZ points ever colonised | mean 38 of 286 |
+
+  Inside the TCZ, the point-years are almost all on natural points. Once colonised they never
+  dry, because `surv.prob` = 1 until step 5. Expect this to fall once the drying data is in.
+- Run time: about 3 min per 100 runs × 50 years on a laptop (about 2 s per run). For step 3:
+  one greedy pass over about 267 interventions × 20 runs is about 3 h.
