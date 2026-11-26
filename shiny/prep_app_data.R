@@ -11,10 +11,12 @@
 #                                 out/pastoral-boundaries.shp which load-data.R writes)
 #
 # Output:
-#   - shiny/data/app_data.rds
+#   - shiny/data/app_data.rds   (read by the legacy Shiny app, app.R)
+#   - shiny/web/data/*          (read by the JavaScript forecast site; written by
+#                                export_web_data.R, sourced at the end)
 #
 # It is sourced at the end of src/tcz-sims/forecast.R (boundaries already in session).
-# It can also be run standalone (e.g. to rebuild the shinylive site without re-running
+# It can also be run standalone (e.g. to refresh the web site's data without re-running
 # the forecast) as long as out/forecast.RData and out/pastoral-boundaries.shp exist.
 
 library(dplyr)
@@ -179,3 +181,6 @@ cat(
   " Years          :", length(years), "\n",
   " Rows           :", nrow(prob_data), "\n"
 )
+
+# ---- Static web data for the JavaScript forecast site (shiny/web/) ----
+source("shiny/export_web_data.R")

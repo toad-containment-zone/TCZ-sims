@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cane Toad Forecast | toadfree.zone</title>
+  <meta name="description" content="Probabilistic forecast of cane toad spread towards Broome and into the Pilbara, Western Australia.">
+
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="preload" href="data/forecast.json" as="fetch" crossorigin>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/flatly/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-R6471VNBFP"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-R6471VNBFP');
+  </script>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-sm tcz-navbar">
+  <div class="container-fluid">
+    <a class="navbar-brand tcz-brand" href="https://toadfree.zone" target="_blank" rel="noopener" title="toadfree.zone">
+      <img src="tcz-mark.svg" alt="TCZ" class="tcz-mark" height="30">
+      <span>Cane Toad Forecast</span>
+    </a>
+    <ul class="navbar-nav flex-row gap-3" role="tablist">
+      <li class="nav-item"><a class="nav-link active" href="#forecast" data-tab="forecast" role="tab">Forecast</a></li>
+      <li class="nav-item"><a class="nav-link" href="#about" data-tab="about" role="tab">About</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ---- Forecast tab ---- -->
+<main id="tab-forecast" class="tab-pane-x">
+  <div class="forecast-layout">
+    <aside class="forecast-sidebar">
+      <label for="year" class="form-label mb-1">Year</label>
+      <div class="year-readout" id="year-readout" aria-live="polite">&nbsp;</div>
+      <input type="range" class="form-range" id="year" min="0" max="0" step="1" value="0">
+      <div class="d-flex justify-content-between small text-muted year-ends">
+        <span id="year-min"></span><span id="year-max"></span>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="play" aria-label="Play animation">
+        <span class="play-icon" aria-hidden="true">&#9654;</span> <span class="play-label">Play</span>
+      </button>
+
+      <p class="text-muted small mt-3">
+        Each dot is a waterpoint. Colour shows the probability it has been
+        colonised by toads by the selected year, based on <span class="n-sims">…</span>
+        simulation replicates. Click any dot for details.
+      </p>
+
+      <hr>
+
+      <a href="https://www.surveymonkey.com/r/BJ8YV9H" target="_blank" rel="noopener"
+         class="btn btn-primary w-100 mb-3">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="vertical-align:-2px">
+          <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v.217l7 4.2 7-4.2V4a1 1 0 0 0-1-1zm13 2.383-4.708 2.825L15 11.105zm-.034 6.876-5.64-3.471L8 9.583l-1.326-.795-5.64 3.47A1 1 0 0 0 2 13h12a1 1 0 0 0 .966-.741M1 11.105l4.708-2.897L1 5.383z"/>
+        </svg>
+        Get annual forecast updates
+      </a>
+
+      <hr>
+
+      <p class="text-muted small">
+        Forecast last updated: <strong class="updated">…</strong>.<br>
+        <a href="https://toadfree.zone" target="_blank" rel="noopener">toadfree.zone</a>
+      </p>
+    </aside>
+
+    <section class="forecast-map card">
+      <div id="map" role="region" aria-label="Forecast map"></div>
+      <div id="map-status" class="map-status">Loading forecast…</div>
+    </section>
+  </div>
+</main>
+
+<!-- ---- About tab ---- -->
+<main id="tab-about" class="tab-pane-x" hidden>
+  <div class="container py-4" style="max-width: 860px;">
+
+    <h2>About this forecast</h2>
+
+    <p>
+      This tool shows a probabilistic forecast of cane toad spread towards Broome and into
+      the Pilbara region of Western Australia. The coloured dots on the map
+      represent known waterpoints, and the colour of each dot shows the
+      likelihood that toads will have reached that waterpoint by the year
+      you select. The forecast is based on a computer simulation model that
+      has been fitted to — and validated against — the real history of toad
+      spread across northern Australia.
+    </p>
+
+    <h3>How the spread model works</h3>
+
+    <h4>Waterpoints are the key</h4>
+    <p>
+      Cane toads cannot survive the northern dry season without water. In seasonally arid
+      landscapes like the southern Kimberley and Pilbara, water is found at discrete
+      points — bores, tanks, dams, springs, and rock holes — scattered
+      across an otherwise dry landscape. The model treats these waterpoints
+      as stepping stones. Toads establish at a waterpoint and survive there over the dry season.
+      The next wet season they breed nearby and then
+      the young toads disperse outward.  If they are lucky, they find another waterpoint to survive the next dry season.
+    </p>
+
+    <h4>Rainfall drives how far toads move</h4>
+    <p>
+      How far toads can disperse in a given year depends on rainfall.
+      More rainy days means more nights of active movement, and so toads
+      can travel further. The model uses the average number of rainy days
+      recorded at each waterpoint over the past 20 years to estimate a
+      "dispersal kernel" — essentially a probability map of how likely a
+      toad starting at one waterpoint is to reach any other waterpoint
+      during a wet season. This dispersal kernel was calibrated using
+      GPS-tracked toads from the invasion front near Darwin.
+    </p>
+
+    <h4>Colonisation is a numbers game</h4>
+    <p>
+      Once we know how far toads are likely to travel, the model works out
+      how many toads are expected to arrive at each unoccupied waterpoint
+      from all the occupied waterpoints around it. A waterpoint is
+      considered colonised when at least two toads arrive — one toad alone
+      cannot establish a breeding population. Once colonised, a waterpoint
+      becomes a new source of dispersing toads in the following wet season.
+    </p>
+
+    <h4>Many simulations give us probabilities</h4>
+    <p>
+      Toad spread is not perfectly predictable — there is genuine randomness
+      in how many toads arrive at any given point in any given year.
+      To capture this uncertainty, the model is run many times (<span class="n-sims">…</span>
+      replicates), each time with slightly different random outcomes for
+      dispersal and colonisation. The colour on the map reflects the
+      fraction of those runs in which a given waterpoint was colonised by
+      the selected year. A waterpoint shown in dark red was reached in
+      nearly every simulation run; a yellow waterpoint was reached in only
+      a small proportion of runs.
+    </p>
+
+    <h4>Model fitting and initialisation</h4>
+    <p>
+      The model was originally developed using data on toad spread through
+      the Victoria River District and the Kimberley. We re-fitted it to
+      the observed spread across the Kimberley, which gives a more precise
+      estimate of how fast and how readily toads move through this type of
+      landscape. The forecast shown here is initialised each year from the latest known
+      position of the toad invasion front, as mapped by
+      nocturnal surveys across the front.
+    </p>
+
+    <hr>
+    <h3>Acknowledgements</h3>
+    <p>
+      This website is supported by the SKIP Foundation, the Western Australian Government’s
+      Department of Energy and Economic Diversification (through the Premier’s Science Fellowship Program),
+      and by BHP Social Investments. Data locating the invasion front each year have been collected
+      with the assistance of Nyikina Mangala, Karajarri, and Nyangumarta Rangers.
+    </p>
+    <p>
+      The app was built by
+      <a href="https://popbiolgenomics.org/team/ben/" target="_blank" rel="noopener">Ben Phillips</a>,
+      with help from Claude AI.
+    </p>
+
+    <hr>
+    <h3>References</h3>
+
+    <ul class="list-unstyled" style="line-height: 1.8;">
+      <li style="margin-bottom: 0.8em;">
+        Dunlop, J., von Takach, B., Dempster, T., Jolly, C. J., Letnic, M.,
+        Lohr, C., Shine, R., Ward-Fear, G., Webb, J. K., Woinarski, J. C. Z.,
+        &amp; Phillips, B. L. (2025). Quantifying the potential impact of the cane
+        toad (<em>Rhinella marina</em>) on biodiversity in Australia's
+        Pilbara region. <em>Scientific Reports</em>, <em>15</em>(1), 37566.
+        <a href="https://doi.org/10.1038/s41598-025-24017-4" target="_blank" rel="noopener">https://doi.org/10.1038/s41598-025-24017-4</a>
+      </li>
+      <li style="margin-bottom: 0.8em;">
+        Southwell, D., Tingley, R., Bode, M., Nicholson, E., &amp; Phillips, B. (2017).
+        Cost and feasibility of a barrier to halt the spread of invasive cane toads
+        in arid Australia: Incorporating expert knowledge into model-based
+        decision-making. <em>Journal of Applied Ecology</em>, <em>54</em>(1), 216–224.
+        <a href="https://doi.org/10.1111/1365-2664.12744" target="_blank" rel="noopener">https://doi.org/10.1111/1365-2664.12744</a>
+      </li>
+      <li style="margin-bottom: 0.8em;">
+        Tingley, R., Phillips, B. L., Letnic, M., Brown, G. P., Shine, R.,
+        &amp; Baird, S. J. E. (2013). Identifying optimal barriers to halt the
+        invasion of cane toads <em>Rhinella marina</em> in arid Australia.
+        <em>Journal of Applied Ecology</em>, <em>50</em>, 129–137.
+        <a href="https://doi.org/10.1111/1365-2664.12021" target="_blank" rel="noopener">https://doi.org/10.1111/1365-2664.12021</a>
+      </li>
+    </ul>
+
+    <hr>
+
+    <p class="text-muted small">
+      Forecast last updated: <strong class="updated">…</strong>.
+      <a href="https://toadfree.zone" target="_blank" rel="noopener">toadfree.zone</a>
+    </p>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
