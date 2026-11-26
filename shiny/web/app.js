@@ -13,6 +13,8 @@
   }
 
   var GREY = { radius: 3, fillColor: '#aaaaaa', fillOpacity: 0.4 };
+  var INITIAL_ZOOM_IN = 2;   // zoom steps closer than the data's initial bounds
+  var BROOME = [-17.9614, 122.2359];
   var PLAY_MS = 900;
 
   // ---- Tabs ----
@@ -29,7 +31,8 @@
     // the map has a view, so give it a provisional view, refresh the size, fit.
     if (!map._loaded) map.setView(L.latLngBounds(bounds).getCenter(), 5, { animate: false });
     map.invalidateSize({ pan: false });
-    map.fitBounds(bounds, { animate: false });
+    var b = L.latLngBounds(bounds);
+    map.setView(b.getCenter(), map.getBoundsZoom(b) + INITIAL_ZOOM_IN, { animate: false });
   }
   function showTab(name) {
     tabs.forEach(function (a) { a.classList.toggle('active', a.dataset.tab === name); });
@@ -64,6 +67,16 @@
   map.createPane('points');
   map.getPane('points').style.zIndex = 450;
   var pointRenderer = L.canvas({ pane: 'points', padding: 0.5 });
+
+  // Broome: many users live there and the basemap labels it only faintly.
+  map.createPane('towns');
+  map.getPane('towns').style.zIndex = 460;
+  L.circleMarker(BROOME, {
+    pane: 'towns', radius: 6, color: '#1c2b33', weight: 2, fillColor: '#ffffff', fillOpacity: 1,
+    interactive: false
+  }).bindTooltip('Broome', {
+    permanent: true, direction: 'right', offset: [8, 0], className: 'town-label'
+  }).addTo(map);
 
   // Legend
   var legend = L.control({ position: 'bottomright' });

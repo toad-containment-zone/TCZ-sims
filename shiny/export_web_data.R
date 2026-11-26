@@ -24,7 +24,12 @@ export_web_data <- function(rds     = "shiny/data/app_data.rds",
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
   # ---- Points: one row per waterpoint, in all_points order ----
+  # Waterpoints inside the TCZ polygon are left off the public map (they're
+  # still in the simulation, and in app_data.rds for the legacy Shiny app).
   pts <- d$all_points
+  pts_sf <- st_as_sf(pts, coords = c("lon", "lat"), crs = 4326, remove = FALSE)
+  in_tcz <- lengths(st_intersects(pts_sf, st_transform(d$tcz_boundary, 4326))) > 0
+  pts <- pts[!in_tcz, , drop = FALSE]
   pd  <- d$prob_data
   arrival <- pd$mean_arrival[match(pts$ID, pd$ID)]
 
@@ -68,7 +73,7 @@ export_web_data <- function(rds     = "shiny/data/app_data.rds",
   sizes <- file.size(file.path(out_dir, c("forecast.json", "tcz.geojson", "pastoral.geojson")))
   cat(
     "Wrote web data to ", out_dir, "\n",
-    "  points: ", nrow(pts), ", years: ", length(d$years), "\n",
+    "  points: ", nrow(pts), " (dropped ", sum(in_tcz), " inside the TCZ), years: ", length(d$years), "\n",
     "  sizes (KB): forecast ", round(sizes[1] / 1024), ", tcz ", round(sizes[2] / 1024),
     ", pastoral ", round(sizes[3] / 1024), "\n",
     sep = ""

@@ -6,6 +6,8 @@
   <title>Cane Toad Forecast | toadfree.zone</title>
   <meta name="description" content="Probabilistic forecast of cane toad spread towards Broome and into the Pilbara, Western Australia.">
 
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="preload" href="data/forecast.json" as="fetch" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/flatly/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -22,9 +24,12 @@
 </head>
 <body>
 
-<nav class="navbar navbar-expand-sm bg-primary" data-bs-theme="dark">
+<nav class="navbar navbar-expand-sm tcz-navbar">
   <div class="container-fluid">
-    <span class="navbar-brand">Cane Toad Forecast</span>
+    <a class="navbar-brand tcz-brand" href="https://toadfree.zone" target="_blank" rel="noopener" title="toadfree.zone">
+      <img src="tcz-mark.svg" alt="TCZ" class="tcz-mark" height="30">
+      <span>Cane Toad Forecast</span>
+    </a>
     <ul class="navbar-nav flex-row gap-3" role="tablist">
       <li class="nav-item"><a class="nav-link active" href="#forecast" data-tab="forecast" role="tab">Forecast</a></li>
       <li class="nav-item"><a class="nav-link" href="#about" data-tab="about" role="tab">About</a></li>
@@ -163,7 +168,7 @@
     <p>
       The app was built by
       <a href="https://popbiolgenomics.org/team/ben/" target="_blank" rel="noopener">Ben Phillips</a>,
-      with help from Claude AI.  It is hosted on the ARDC's Nectar Cloud.
+      with help from Claude AI.
     </p>
 
     <hr>

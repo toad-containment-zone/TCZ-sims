@@ -1,8 +1,47 @@
 html, body { height: 100%; }
 body { background: #fff; display: flex; flex-direction: column; }
 
-.navbar { padding-top: .6rem; padding-bottom: .6rem; }
-.navbar .nav-link { cursor: pointer; }
+/* TCZ brand tokens (TCZ_BrandAssets/01_BrandToolkit.pdf), same as the
+   data-warehousing reporting apps. Accents only: headings, buttons, links and
+   the navbar pick up Rock/Sand; body text and the forecast's data colours
+   (YlOrRd probability bins) stay as they are. */
+:root {
+  --tcz-rock: #59190c;
+  --tcz-rock-hover: #742413;
+  --tcz-sand: #f5f1e6;
+  --tcz-dirt: #bf532c;
+  --tcz-olive: #838851;
+  --bs-link-color: var(--tcz-rock);
+  --bs-link-color-rgb: 89, 25, 12;
+  --bs-link-hover-color: var(--tcz-rock-hover);
+  --bs-link-hover-color-rgb: 116, 36, 19;
+}
+
+/* Navbar: Sand bar, Rock rule + active-tab underline */
+.tcz-navbar { background: var(--tcz-sand); border-bottom: 2px solid var(--tcz-rock); padding-top: .4rem; padding-bottom: .4rem; }
+.tcz-brand { display: inline-flex; align-items: center; gap: 10px; color: var(--tcz-rock); font-weight: 600; }
+.tcz-brand:hover, .tcz-brand:focus { color: var(--tcz-rock); opacity: .85; }
+.tcz-brand .tcz-mark { height: 30px; width: auto; }
+.tcz-navbar .nav-link { cursor: pointer; color: #3f4e56; padding-bottom: .35rem; }
+.tcz-navbar .nav-link:hover { color: var(--tcz-rock); }
+.tcz-navbar .nav-link.active { color: var(--tcz-rock); font-weight: 600; box-shadow: inset 0 -3px 0 var(--tcz-rock); }
+
+.btn-primary { --bs-btn-bg: var(--tcz-rock); --bs-btn-border-color: var(--tcz-rock);
+  --bs-btn-hover-bg: var(--tcz-rock-hover); --bs-btn-hover-border-color: var(--tcz-rock-hover);
+  --bs-btn-active-bg: var(--tcz-rock-hover); --bs-btn-active-border-color: var(--tcz-rock-hover); }
+.btn-outline-secondary { --bs-btn-color: var(--tcz-rock); --bs-btn-border-color: var(--tcz-rock);
+  --bs-btn-hover-bg: var(--tcz-rock); --bs-btn-hover-border-color: var(--tcz-rock); --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: var(--tcz-rock-hover); --bs-btn-active-border-color: var(--tcz-rock-hover); }
+h2, h3, h4 { color: var(--tcz-rock); }
+.form-range::-webkit-slider-thumb { background: var(--tcz-rock); }
+.form-range::-moz-range-thumb { background: var(--tcz-rock); }
+.form-range:focus::-webkit-slider-thumb { box-shadow: 0 0 0 1px #fff, 0 0 0 .25rem rgba(89, 25, 12, .25); }
+.form-range:focus::-moz-range-thumb { box-shadow: 0 0 0 1px #fff, 0 0 0 .25rem rgba(89, 25, 12, .25); }
+
+/* Broome label */
+.town-label { background: rgba(255,255,255,.92); border: 1px solid #1c2b33; border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.3); color: #1c2b33; font-weight: 700; font-size: 13px; padding: 1px 6px; }
+.town-label::before { display: none; }
 
 /* ---- Forecast tab: sidebar + map ---- */
 #tab-forecast { flex: 1 1 auto; min-height: 0; }
@@ -17,7 +56,8 @@ body { background: #fff; display: flex; flex-direction: column; }
   flex: 0 0 310px;
   overflow-y: auto;
   padding: 1rem;
-  background: #f8f9fa;
+  background: #fcfbf9;
+  border: 1px solid rgba(0,0,0,.08);
   border-radius: .375rem;
 }
 .forecast-map {
@@ -28,7 +68,7 @@ body { background: #fff; display: flex; flex-direction: column; }
 }
 #map { position: absolute; inset: 0; }
 
-.year-readout { font-size: 1.75rem; font-weight: 600; line-height: 1.1; margin-bottom: .25rem; color: #2c3e50; }
+.year-readout { font-size: 1.75rem; font-weight: 600; line-height: 1.1; margin-bottom: .25rem; color: var(--tcz-rock); }
 .year-ends { margin-top: -.25rem; }
 .play-icon { display: inline-block; width: 1em; }
 
