@@ -1,6 +1,7 @@
 # Shared setup for the TCZ scenarios (tcz-sims.R, tcz-optimise.R): loads data, defines the
 # simulation region and colonised/target points, runs setup(), and checks the intervention units.
-# Leaves spread.table, pairs and tcz.units.sim (unit metadata per spread.table row) in the session.
+# Leaves spread.table, pairs, pairs.extreme, rain.years and tcz.units.sim (unit metadata per
+# spread.table row) in the session.
 
 ######## load functions and libraries ########
 source("src/tcz-sims/load-data.R") # provides tcz.points: TCZ audit records as intervention units (build-tcz-units.R)
@@ -66,6 +67,16 @@ ggplot() +
            ylim = c(bbox["ymin"], bbox["ymax"]))
 
 
+######## year-by-year rainfall: extreme wet years and extreme-year rainy days (rain-years.R) ########
+source("src/tcz-sims/rain-years.R")
+rain.years <- rain_years(tcz.points)
+# both kernels come from SILO: the standard kernel from each point's mean rainy days over the
+# reference years (replacing the rainfall raster used by forecast.R), the extreme kernel from its
+# maximum (project lead's decision, 2026-11-26)
+tcz.points$rain.mean <- rain.years$point.rain.days.mean
+tcz.points$rain.extreme <- rain.years$point.rain.days.max
+stopifnot(!anyNA(tcz.points$rain.mean), !anyNA(tcz.points$rain.extreme))
+
 ######## load simulation posteriors ########
 load("dat/Posteriors_2026.RData")
 
@@ -76,14 +87,15 @@ setup(point.data = tcz.points,
       Y.id = "Y",
       present.id = "colonised",
       artificial.natural.id = "art_nat",
-      rain.id = "rainfall",
+      rain.id = "rain.mean", # SILO mean rainy days (not the raster's `rainfall`)
       threshold = 100,
       constant.rain = NULL,
       trunc.dist = TRUE,
       TCZ = FALSE, # keep TCZ artificial points in: they're modelled as tanks/fences via the control step, not removed
       control.type.id = "control.type",
       fence.area.id = "fence.area",
-      fence.units.id = "fence.units")
+      fence.units.id = "fence.units",
+      rain.extreme.id = "rain.extreme") # builds pairs.extreme
 
 # every TCZ intervention unit must survive setup()'s spatial de-duplication, and nothing outside
 # the TCZ may carry a control

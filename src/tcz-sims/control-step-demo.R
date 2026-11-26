@@ -8,6 +8,9 @@
 #      even though the new columns are present in spread.table.
 #   B. Attrition: with control.step=TRUE, tank/fence points go extinct at their expected annual
 #      rates (1%/5%) and natural points (default surv.prob=1) never do.
+#   D. Eradication responses: each occupied fence found at the annual audit is counted once.
+#   E. Extreme-wet-year kernel: extreme.years all FALSE reproduces a standard run exactly (same seed);
+#      all TRUE, with a wetter extreme kernel, colonises distant targets more often.
 #   C. Fence breach-thinning: fenced target points (r.eff == r, isolating p.breach's effect) get
 #      colonised less often than otherwise-identical unfenced targets at the same distance, by
 #      about the amount Binom(c, p.breach) thinning predicts. Uses a realistic, small p.breach
@@ -62,6 +65,13 @@ rate <- function(type) 1 - mean(pm[pm[,"control.type"]==type, "Pres"])
 cat(sprintf("Tank extinction rate:    %.4f (expected ~0.99)\n", rate(CONTROL_TANK)))
 cat(sprintf("Fence extinction rate:   %.4f (expected ~0.95)\n", rate(CONTROL_FENCE)))
 cat(sprintf("Natural extinction rate: %.4f (expected 0, surv.prob defaults to 1)\n", rate(CONTROL_NONE)))
+
+cat("\n== D. Eradication responses (same run as B) ==\n")
+# every occupied fence is found at the audit, so each pre-colonised fence has exactly one response
+# after one generation; tanks and natural points never trigger one
+stopifnot(all(pm[pm[, "control.type"]==CONTROL_FENCE, "erad.events"] == 1),
+          all(pm[pm[, "control.type"]!=CONTROL_FENCE, "erad.events"] == 0))
+cat("One eradication response per occupied fence, none elsewhere: TRUE\n")
 
 cat("\n== occ.years / first.col.gen sanity (control.step=TRUE, 10 generations) ==\n")
 out.C <- spread.pilb(pop = attrition.table, gens = 10, pairs = attrition.pairs,
@@ -147,3 +157,33 @@ cat("Breach-thinning direction check passed\n")
 cat("age==0 exactly where first.col.gen is NA (last rep):",
     all((pm[, "age"]==0) == is.na(pm[, "first.col.gen"])), "\n")
 
+
+######## Dataset 3: extreme-wet-year kernel ########
+cat("\n== E. Extreme-wet-year kernel ==\n")
+n.far <- 40
+far.angles <- seq(0, 2*pi, length.out = n.far + 1)[seq_len(n.far)]
+far.dist <- 1500 # the extreme kernel is flatter: fewer arrivals within ~1 km, more beyond (expected ~0.12 vs ~0.18 here)
+kernel.data <- rbind(data.frame(X = 0, Y = 0, present = 1),
+                     data.frame(X = far.dist*cos(far.angles), Y = far.dist*sin(far.angles), present = 0))
+kernel.data$art_nat <- 1
+kernel.data$control_type <- "none"
+kernel.data$rain_extreme <- 80 # rainy days in an extreme year -> rain_to_days(80) ~ 230 movement days
+setup(point.data = kernel.data,
+      X.id = "X", Y.id = "Y", present.id = "present", artificial.natural.id = "art_nat",
+      remove_duplicates = FALSE, constant.rain = 100, TCZ = FALSE, # standard: 100 movement days
+      control.type.id = "control_type", rain.extreme.id = "rain_extreme")
+far.idx <- spread.table[, "ID"] > 1
+run_E <- function(extreme, seed.E) {
+  set.seed(seed.E)
+  spread.pilb(pop = spread.table, gens = 1, pairs = pairs, delta = 200, r = r, rollup = FALSE,
+              control.step = TRUE, pairs.extreme = if (is.null(extreme)) NULL else pairs.extreme,
+              extreme.years = extreme)$popmatrix
+}
+same <- all(sapply(1:20, function(k) identical(run_E(NULL, k), run_E(FALSE, k))))
+stopifnot(same)
+cat("extreme.years = FALSE reproduces a standard run exactly:", same, "\n")
+std.rate <- mean(sapply(1:200, function(k) mean(run_E(FALSE, k)[far.idx, "Pres"])))
+ext.rate <- mean(sapply(1:200, function(k) mean(run_E(TRUE, k)[far.idx, "Pres"])))
+cat(sprintf("Colonisation rate of targets %d m away: standard %.3f, extreme %.3f\n", far.dist, std.rate, ext.rate))
+stopifnot(ext.rate > std.rate)
+cat("Extreme kernel check passed\n")

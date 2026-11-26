@@ -50,7 +50,7 @@ when we start it, and this file is updated as steps change or finish.
    - Work out the run budget and whether it needs the cluster (`src/cluster/`).
    - Build this first with a static `surv.prob`, so it works end to end before the drying data
      goes in.
-4. **Fence eradication branch and the extreme-wet-year kernel.**
+4. **Fence eradication branch and the extreme-wet-year kernel.** ✅ Done 2026-11-26 (see below).
    - When a fence is breached, the annual audit triggers eradication, which has its own cost and a
      5% chance of failing. The fence only emits toads (λ) the next year if eradication fails.
      At the moment the code treats fences like tanks, with a flat `control.fail.prob`.
@@ -78,6 +78,15 @@ when we start it, and this file is updated as steps change or finish.
   fixed points. Five more uncosted records sit in units that do have a cost. Two cost rows ("Two
   tree well", "Sea Ranger base", $20k each) match no audit record and are excluded.
 - **Gates:** `fence-lengths` already has `n.gates` for all 8 fenced areas. Confirm that's complete.
+- **Follow-up: is the Kimberley calibration still valid with SILO rainy days?** λ
+  (`dat/Posteriors_2026.RData`) was fitted by ABC (`src/ABC/`) using rainy days from the
+  Kimberley point data's `ndays_1` column, not SILO (its source isn't checked yet). The TCZ runs
+  now take rainy days from SILO, which counts about 50% more than the rainfall raster at the TCZ
+  points (42.6 against 28.3, r = 0.90). If `ndays_1` behaves like the raster, the TCZ model gives
+  longer movement windows than the calibration assumed, and toads may spread faster than the
+  calibrated λ implies. First check: compare `ndays_1` with SILO at the Kimberley points. Possible fixes: refit the ABC with SILO rainy days for the
+  Kimberley points, or rescale SILO to the calibration source. (Flagged by the project lead,
+  2026-11-26.)
 
 ## Detailed step plans
 
@@ -268,3 +277,80 @@ Second run, with removed fences keeping their radius (2026-11-26, 2 min 12 s):
   separate seed block) found **2/100 breaches**. "Zero in 100" only bounds the breach risk at
   about 3.6%, and this design's true risk looks to be around 2%. Worth weighing when the
   restoration rule is decided.
+
+### Step 4 — fence eradication and extreme-wet-year kernel
+
+Plan and decisions (project lead, 2026-11-26):
+- Count an eradication response for every occupied fence at each annual audit (`erad.events` in
+  `spread.pilb()`). The fence biology (5% eradication failure, then emitting λ) was already in the
+  control step. Eradication cost is a parameter: `eradication.cost <- 0` in `tcz-optimise.R`
+  until there's a figure.
+- Extreme wet years are the top 20% of the 25-year reference (2002–2026) by Dec–May SILO rainfall
+  averaged over the cells under the simulated points. In those years toads disperse through
+  `pairs.extreme`, built from each point's cell's maximum rainy days in any reference year.
+- Each run starts at a random reference year and wraps round it. Run r gets the same start in
+  every design. Step 5's drying matrix will use the same year sequence.
+
+Changes:
+- New `src/tcz-sims/rain-years.R` (SILO fetch for 306 cells, cached in
+  `dat/silo-tcz-rain-cache.RData`).
+- `setup(rain.extreme.id=)` builds `pairs.extreme`, and `erad.events` is always present.
+- `spread.pilb(pairs.extreme=, extreme.years=)`.
+- `run_sims(extreme.ref=)` and `eval_design()` draw a random start per run.
+- Demo checks D (eradication counting) and E (`extreme.years = FALSE` reproduces a standard run
+  exactly; the extreme kernel colonises targets 1.5 km away at 0.177 vs 0.116).
+- Methods text: reference years, the random start, the wet-year definition, the 250-day kernel
+  cap, and eradication responses.
+
+Results (2026-11-26; natural points still never dry):
+- **Extreme years:** 2004, 2011, 2017, 2018, 2023. Per point, the wettest-year rainy days range
+  from 45 to 103 (mean 78), against a SILO mean of 43. Points with more than about 91 rainy days
+  go past the 250-day kernel table and are capped: 147 of 848 input points.
+- The extreme kernel is flatter: fewer arrivals within about 1 km, more beyond (at 1.5 km,
+  expected arrivals rise from 1.19 to 1.46).
+- **Baseline: full implementation:** 0/100 breaches. Mean point-years inside the TCZ 610 (step 2:
+  504): natural 572, tank 31, fence 7.
+- **Eradication responses:** the full design triggers a mean of **145 per 50-year run** (range
+  70–192), roughly 3 a year across the 8 fences. The big fenced areas are colonised often. Once a
+  cost per response exists this will weigh heavily on fences.
+- **Optimiser** (1.3 min):
+
+  | Design | Units kept | Cost | Breaches /100 (95% upper) | Point-years avoided | CE (avoided per $M) | Eradications / run |
+  |---|---|---|---|---|---|---|
+  | Do nothing | 0 | $0 | 100 | — | — | 0 |
+  | Full | 261 | $16.52M | 0 (3.6%) | 17,649 | 1,068 | 145 |
+  | Optimised | 256 | $13.15M | 0 (3.6%) | 17,245 | 1,312 | 150 |
+
+  - The screening removed 25 units. The confirmation found 30/100 breaches, and reverse-order
+    restoration put back 20 ($1.91M).
+  - The final design removes 5 units, saving $3.37M: the Shelemar and Shamrock Gardens fences,
+    plus tanks U003–U005.
+  - With the extreme kernel, fewer removals survive than in step 3 (9 units removed then).
+
+Decision (project lead, 2026-11-26): **take all TCZ rainfall from SILO.** The standard kernel now
+uses each point's mean SILO rainy days over the 25 reference years (`rain.id = "rain.mean"` in
+`tcz-setup.R`), not the rainfall raster. The extreme kernel uses the SILO maximum, as before.
+The raster averaged 28.3 rainy days at these points against SILO's 42.6 (r = 0.90), so mixing
+the two sources had exaggerated the jump to the extreme kernel. `forecast.R` still uses the raster.
+
+Re-run with SILO for both kernels:
+- Standard movement days: mean 140 (range 81–190), up from 101 with the raster. Dispersal is
+  faster in ordinary years too.
+- **Baseline: full implementation:** 0/100 breaches. Mean point-years inside the TCZ 647: natural
+  604, tank 35, fence 7.
+
+  | Design | Units kept | Cost | Breaches /100 (95% upper) | Point-years avoided | CE (avoided per $M) | Eradications / run |
+  |---|---|---|---|---|---|---|
+  | Do nothing | 0 | $0 | 100 | — | — | 0 |
+  | Full | 261 | $16.52M | 0 (3.6%) | 17,862 | 1,081 | 152 |
+  | Optimised | 256 | $13.15M | 0 (3.6%) | 17,443 | 1,327 | 166 |
+
+- The screening removed 27 units. The confirmation found 20/100 breaches, and restoring put back
+  22 ($2.19M).
+- The final design is the same as with the raster: the Shelemar and Shamrock Gardens fences, plus
+  tanks U003–U005, saving $3.37M.
+
+Decision (project lead, 2026-11-26): **keep `days.per.rain = 4`.** It's what both Kimberley ABC
+calibrations used, and it matches the original Tingley et al. formula (`r + 3r(1 − overlap)`:
+movement on the rainy day plus the three following days, a 4-day window). The methods text said
+"three days of movement" and now describes the 4-day window instead. No code change.

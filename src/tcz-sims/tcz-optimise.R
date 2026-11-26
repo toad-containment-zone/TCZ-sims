@@ -1,6 +1,7 @@
 # tcz-optimise.R
 #
 # Optimises the TCZ design (ms/tcz-optimisation-methods.qmd, "Cost optimisation"):
+# With the extreme-wet-year kernel (rain-years.R) and fence eradication responses counted.
 #   1. do-nothing counterfactual (every intervention removed) and full design, 100 full-horizon runs each
 #   2. backward greedy search (most expensive first, 20 runs per test) + 100-run confirmation,
 #      restoring removed units in reverse order while the confirmation finds breaches
@@ -22,6 +23,7 @@ n.screen  <- if (SMOKE) 2 else 20
 n.confirm <- if (SMOKE) 4 else 100
 max.cand  <- if (SMOKE) 5 else Inf
 seed      <- 20261126
+eradication.cost <- 0 # $ per fence eradication response; no figure yet
 
 st <- spread.table
 tcz.rows <- !is.na(tcz.units.sim$unit_id)
@@ -34,7 +36,9 @@ stopifnot(identical(apply_design(st, none), st),
 summarise_design <- function(name, ev, remove) {
   data.frame(design = name,
              units.retained = sum(tcz.rows & !remove),
-             cost = design_cost(tcz.units.sim, remove),
+             cost = design_cost(tcz.units.sim, remove, eradication.cost = eradication.cost,
+                                eradication.events = mean(ev$n.erad)),
+             erad.events = mean(ev$n.erad),
              runs = nrow(ev),
              breaches = sum(ev$breach),
              p.breach = mean(ev$breach),
@@ -44,7 +48,8 @@ summarise_design <- function(name, ev, remove) {
 }
 eval_full <- function(remove, seed.offset) {
   eval_design(apply_design(st, remove), pairs, n.eval, stop.on.target = FALSE,
-              seed = seed + seed.offset, tcz.rows = tcz.rows)
+              seed = seed + seed.offset, tcz.rows = tcz.rows,
+              pairs.extreme = pairs.extreme, extreme.ref = rain.years$ref$extreme)
 }
 
 ######## 1. counterfactual and full design ########
@@ -57,7 +62,8 @@ ev.full <- eval_full(none, 2e6)
 ######## 2. greedy search ########
 cat("Greedy search...\n")
 greedy <- greedy_backward(st, pairs, tcz.units.sim, n.screen = n.screen, n.confirm = n.confirm,
-                          seed = seed, max.candidates = max.cand)
+                          seed = seed, max.candidates = max.cand,
+                          pairs.extreme = pairs.extreme, extreme.ref = rain.years$ref$extreme)
 
 ######## 3. optimised design ########
 cat("Optimised design...\n")
@@ -75,9 +81,9 @@ design <- data.frame(tcz.units.sim[tcz.rows, c("unit_id", "control.type", "cost"
                      retained = !greedy$remove[tcz.rows])
 design$names <- st_drop_geometry(tcz.units)$names[match(design$unit_id, tcz.units$unit_id)]
 
-# check: each candidate tested once; cost removed adds up
+# check: each candidate tested once; capital cost removed adds up
 stopifnot(!anyDuplicated(greedy$log$unit_id),
-          isTRUE(all.equal(summary.tab$cost[2] - summary.tab$cost[3],
+          isTRUE(all.equal(design_cost(tcz.units.sim, none) - design_cost(tcz.units.sim, greedy$remove),
                            sum(design$cost[!design$retained], na.rm = TRUE))))
 
 write.csv(greedy$log, file.path(out.dir, "greedy-log.csv"), row.names = FALSE)

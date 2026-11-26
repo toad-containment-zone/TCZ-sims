@@ -279,8 +279,14 @@ remove_spatial_duplicates <- function(pop.mat, threshold){
 }
 
 # function that will run sims on whatever has been thrown into environment by setup()
+# generation -> reference-year index: start at `start` in an n.ref-year reference and wrap around
+year_index <- function(n.ref, gens, start) ((start - 1 + seq_len(gens) - 1) %% n.ref) + 1
+
 run_sims <- function(n.sims = 100, gens, plot = FALSE, rollup,
-                      control.step = FALSE, stop.on.target = TRUE, drying.matrix = NULL) {
+                      control.step = FALSE, stop.on.target = TRUE, drying.matrix = NULL,
+                      pairs.extreme = NULL, # extreme-wet-year dispersal matrix (setup(rain.extreme.id=))
+                      extreme.ref = NULL) { # logical, one per reference year: is it an extreme wet year?
+  # each rep starts at a random year of the reference and wraps round it (rain-years.R)
   if (control.step && rollup) stop("rollup and control.step cannot both be TRUE -- control-step scenarios must process every site every generation")
   output<-vector("list", length=n.sims) # vector to take outputs
 
@@ -288,9 +294,15 @@ run_sims <- function(n.sims = 100, gens, plot = FALSE, rollup,
     cat("Rep ", rr, " of ", n.sims, "\n")
     lambda.samp<-10^rnorm(1, mean=sample.lambda, sd=sample.lambda.sd)
     r.samp<-10^2
+    start <- NA; extreme.years <- NULL
+    if (!is.null(extreme.ref)) {
+      start <- sample.int(length(extreme.ref), 1)
+      extreme.years <- extreme.ref[year_index(length(extreme.ref), gens, start)]
+    }
     temp<-spread.pilb(pop=spread.table, gens=gens, pairs=pairs, delta=lambda.samp, r=r.samp, plot = plot, rollup = rollup,
-                       control.step = control.step, stop.on.target = stop.on.target, drying.matrix = drying.matrix)
-    temp<-c(temp, list(pars=cbind(lambda=lambda.samp, r=r.samp)))
+                       control.step = control.step, stop.on.target = stop.on.target, drying.matrix = drying.matrix,
+                       pairs.extreme = pairs.extreme, extreme.years = extreme.years)
+    temp<-c(temp, list(pars=cbind(lambda=lambda.samp, r=r.samp), start = start))
     output[[rr]]<-temp
     gc() # cleanup memory
   }
@@ -379,7 +391,8 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
                   nat.surv.prob.id = NULL, # name of a column giving per-point natural survival probability (1 - drying prob)
                   control.fail.prob.id = NULL, # name of a column overriding the default annual control-defeat probability
                   col.year.id = NULL, # name of a column giving each point's known historical colonisation year (NA if unknown/not colonised)
-                  start.year = NULL # forecast start year; required when col.year.id is supplied, to convert a colonisation year into a generation offset
+                  start.year = NULL, # forecast start year; required when col.year.id is supplied, to convert a colonisation year into a generation offset
+                  rain.extreme.id = NULL # name of a column giving each point's rainy days in an extreme wet year -- builds pairs.extreme, the extreme-year dispersal matrix
 ){
   cat("Loading kernel parameters...\n")
   load("dat/Kernel-fits_truncated.RData")
@@ -405,6 +418,21 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
   #browser()
   u<-fits[u, c("u", "v", "max.dist", "area")]
   if (!trunc.dist) u[, "max.dist"] <- NULL # to switch to infinite positive bounds on kernel
+
+  # extreme-wet-year kernel: the same lookup from each point's extreme-year rainy days
+  # (ms/tcz-optimisation-methods.qmd, "Modelled scenario"); movement days beyond the fitted
+  # kernel table are capped at its last row
+  u.x <- NULL
+  if (!is.null(rain.extreme.id)) {
+    days.x <- rain_to_days(pData[[rain.extreme.id]])
+    if (any(days.x > nrow(fits))) {
+      warning(sum(days.x > nrow(fits)), " point(s) have extreme-year movement days beyond the kernel table (",
+              nrow(fits), "); capped")
+      days.x <- pmin(days.x, nrow(fits))
+    }
+    u.x <- fits[days.x, c("u", "v", "max.dist", "area")]
+    colnames(u.x) <- paste0(colnames(u.x), ".x")
+  }
   
   cat("Building spread table...\n")
   
@@ -472,7 +500,9 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
                          surv.prob = surv.prob,
                          control.fail.prob = control.fail.prob,
                          occ.years = occ.years,
-                         first.col.gen = first.col.gen)
+                         first.col.gen = first.col.gen,
+                         erad.events = 0) # eradication responses at a fence (one per audit that finds toads)
+  if (!is.null(u.x)) spread.table <- cbind(spread.table, u.x)
   
   if (!is.null(observations)){ # does nothing if NULL, else vector of column names
     spread.table <- cbind(spread.table, obs = as.matrix(pData[observations]))
@@ -492,6 +522,15 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
                             u = outList$spread.table[,"u"], 
                             v = outList$spread.table[,"v"])/outList$spread.table[, "area"]
   d_mat[outList$pairs > outList$spread.table[, "max.dist"]] <- 0L
+  if (!is.null(u.x)) { # extreme-year dispersal matrix, from the same (post-dedup) distances
+    d_mat.x <- dcncross(outList$pairs,
+                        u = outList$spread.table[,"u.x"],
+                        v = outList$spread.table[,"v.x"])/outList$spread.table[, "area.x"]
+    d_mat.x[outList$pairs > outList$spread.table[, "max.dist.x"]] <- 0L
+    outList$pairs.extreme <- Matrix(d_mat.x, sparse = TRUE)
+  } else if (exists("pairs.extreme", envir = globalenv())) {
+    rm("pairs.extreme", envir = globalenv()) # don't leave a stale extreme matrix from an earlier setup()
+  }
   outList$pairs <- Matrix(d_mat, sparse = TRUE) 
   
   cat("Placing spread table and dispersal matrix in: ")
@@ -506,13 +545,19 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
 spread.pilb<-function(pop, gens, pairs, delta, r, plot=FALSE, rollup,
                        control.step=FALSE, # opt-in within-timestep control/extinction step
                        stop.on.target=TRUE, # FALSE to keep running the full horizon after a target breach (for point-years accounting)
-                       drying.matrix=NULL # optional gens x n matrix of natural drying probabilities, refreshed into surv.prob each generation
+                       drying.matrix=NULL, # optional gens x n matrix of natural drying probabilities, refreshed into surv.prob each generation
+                       pairs.extreme=NULL, # optional extreme-wet-year dispersal matrix (from setup(rain.extreme.id=))
+                       extreme.years=NULL # optional logical, one per generation: TRUE = disperse through pairs.extreme
                        ){ #pairs is a list from pdist.fast
   if (control.step && rollup) stop("rollup and control.step cannot both be TRUE -- control-step scenarios must process every site every generation")
   if (control.step){
-    required.cols <- c("control.type", "r.eff", "fence.units", "p.breach", "surv.prob", "control.fail.prob", "occ.years", "first.col.gen")
+    required.cols <- c("control.type", "r.eff", "fence.units", "p.breach", "surv.prob", "control.fail.prob", "occ.years", "first.col.gen", "erad.events")
     missing.cols <- setdiff(required.cols, colnames(pop))
     if (length(missing.cols) > 0) stop("control.step=TRUE requires spread.table columns built via setup()'s control-step arguments; missing: ", paste(missing.cols, collapse=", "))
+  }
+  if (!is.null(extreme.years)) {
+    if (is.null(pairs.extreme)) stop("extreme.years needs pairs.extreme (setup(rain.extreme.id=))")
+    if (length(extreme.years) < gens) stop("extreme.years must have at least gens (", gens, ") values")
   }
   trigger <- TRUE # to catch time to first arrival in pilbara
   time.to.target <- NA
@@ -544,7 +589,8 @@ spread.pilb<-function(pop, gens, pairs, delta, r, plot=FALSE, rollup,
     }
     lambda_t_x <- rpois(sum(occp), delta) # stochastic propagules from occupied site x time t
     gma <- sum(lambda_t_x) # total propagules at this time step
-    pairs_t<-pairs[occp, , drop = FALSE] #collect relevant rows of pairwise dispersal matrix
+    kernel_i <- if (!is.null(extreme.years) && extreme.years[i]) pairs.extreme else pairs # extreme-wet-year kernel this generation?
+    pairs_t<-kernel_i[occp, , drop = FALSE] #collect relevant rows of pairwise dispersal matrix
     expected_n <- drop(crossprod(pairs_t, lambda_t_x))*(pi*r_vec^2) # sum density contributions from all sources and convert to expected n
     if (gma == 0){ # no propagules produced this generation (rmultinom errors on an all-zero probability vector)
       colonised <- rep(FALSE, nrow(pop))
@@ -582,6 +628,10 @@ spread.pilb<-function(pop, gens, pairs, delta, r, plot=FALSE, rollup,
       # Tank and fence resolve identically here (only their route into colonisation differs: fences
       # are breach-thinned at the colonisation step above), so both are drawn in one rbinom() call
       # over their per-row control.fail.prob values.
+      # every occupied fence found at the annual audit triggers an eradication response (costed in
+      # the optimiser); whether it fails is the control.fail.prob draw below
+      fence.occ <- is.fence & occ.now
+      if (any(fence.occ)) pop[fence.occ, "erad.events"] <- pop[fence.occ, "erad.events"] + 1
       control.idx <- is.tank.or.fence & occ.now
       if (any(control.idx)){
         persists <- rbinom(sum(control.idx), 1, pop[control.idx, "control.fail.prob"])
