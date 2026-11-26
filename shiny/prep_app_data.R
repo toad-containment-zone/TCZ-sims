@@ -11,7 +11,7 @@
 #                                 out/pastoral-boundaries.shp which load-data.R writes)
 #
 # Output:
-#   - shiny/data/app_data.rds   (read by the legacy Shiny app, app.R)
+#   - shiny/data/app_data.rds   (intermediate; input to export_web_data.R)
 #   - shiny/web/data/*          (read by the JavaScript forecast site; written by
 #                                export_web_data.R, sourced at the end)
 #
@@ -100,9 +100,9 @@ prob_data <- prob_data |>
 # ---- Waterpoints for background display ----
 # Only points colonised in at least one replicate (i.e. present in all_arrivals).
 # Points that are never colonised -- everything south of the fastest replicate's
-# front, which stops at the first TCZ breach -- carry no information but, under
-# shinylive/webR, each is a live browser marker. Dropping them cuts the app's
-# memory and render cost. prob_data is already colonised-only (built above from
+# front, which stops at the first TCZ breach -- carry no information but each
+# would be a browser marker on the web map. Dropping them cuts its data size
+# and render cost. prob_data is already colonised-only (built above from
 # all_arrivals), so all_points is the last place these points survive.
 n_all_points <- nrow(as.data.frame(output[[1]]$popmatrix))
 all_points <- as.data.frame(output[[1]]$popmatrix) |>

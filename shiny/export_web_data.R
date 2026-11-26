@@ -8,7 +8,7 @@
 #   pastoral.geojson   pastoral lease boundaries (geometry only)
 #
 # prep_app_data.R sources this at the end, so a normal forecast run refreshes
-# both the .rds (used by the legacy Shiny app, app.R) and the web data. It can
+# both the .rds and the web data. It can
 # also be run on its own from the repo root:
 #   Rscript shiny/export_web_data.R
 
@@ -25,7 +25,7 @@ export_web_data <- function(rds     = "shiny/data/app_data.rds",
 
   # ---- Points: one row per waterpoint, in all_points order ----
   # Waterpoints inside the TCZ polygon are left off the public map (they're
-  # still in the simulation, and in app_data.rds for the legacy Shiny app).
+  # still in the simulation and in app_data.rds).
   pts <- d$all_points
   pts_sf <- st_as_sf(pts, coords = c("lon", "lat"), crs = 4326, remove = FALSE)
   in_tcz <- lengths(st_intersects(pts_sf, st_transform(d$tcz_boundary, 4326))) > 0
