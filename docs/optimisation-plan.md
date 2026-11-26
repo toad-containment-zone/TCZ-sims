@@ -40,7 +40,7 @@ when we start it, and this file is updated as steps change or finish.
      polygon stay colonised through the control step.
    - Sum costs per site (conversion and maintenance). Check that every TCZ site has a cost and a
      control type.
-3. **Cost and objective accounting, then the greedy optimiser.**
+3. **Cost and objective accounting, then the greedy optimiser.** ✅ Pipeline built 2026-11-26 (see below). Results are provisional until steps 4–5.
    - Total 50-year cost: capital, recurrent, and eradication events.
    - Point-years avoided against a do-nothing run on the same point set; a breach flag; CE.
    - Backward greedy search:
@@ -199,3 +199,72 @@ Results:
 
   The rise in point-years is almost all on natural points: one more natural point inside the
   TCZ, and natural points still never dry.
+
+### Step 3 — cost accounting and greedy optimiser
+
+Plan:
+- Split `tcz-sims.R` into `tcz-setup.R` (shared setup and unit checks) and the baseline run.
+- New `optimise-functions.R`:
+  - `apply_design()` removes interventions from a copy of `spread.table`. The water stays,
+    uncontrolled: `control.type` none, `r.eff` NA, `p.breach` 0, `control.fail.prob` 0.
+  - `eval_design()` runs n runs in parallel with common random numbers (run r always uses
+    `set.seed(seed + r)`).
+  - `design_cost()`: capital, plus maintenance and eradication hooks that default to 0.
+  - `greedy_backward()`: one pass, most expensive first, 20 runs per test, with a run stopping
+    at its first breach. Then a 100-run confirmation on a separate seed block, restoring removed
+    units in reverse order of removal while it finds breaches (project lead's decision).
+- New `tcz-optimise.R`: do-nothing counterfactual, full design, greedy search, then the optimised
+  design (100 full-horizon runs each). Writes `out/optimisation/`. `SMOKE <- TRUE` gives a quick
+  plumbing check.
+- Methods text: costs are direct costs; the reverse-order restoration rule; common random numbers.
+
+First full run (2026-11-26, 2 min 11 s on 8 cores; natural points never dry, no eradication
+branch, no extreme-wet-year kernel):
+
+| Design | Units kept | Cost | Breaches /100 (95% upper) | Point-years (all points) | Point-years avoided | CE (avoided per $M) |
+|---|---|---|---|---|---|---|
+| Do nothing | 0 | $0 | 100 | 33,327 | — | — |
+| Full | 261 | $16.52M | 0 (3.6%) | 16,343 | 16,984 | 1,028 |
+| Optimised | 249 | $11.72M | 0 (3.6%) | 16,765 | 16,561 | 1,413 |
+
+- The screening removed 54 of the 197 candidates. Every removal had passed 0/20 on its own, but
+  together they gave 17/100 breaches at confirmation. Restoring in reverse order then put 42
+  units back ($2.89M) before reaching 0/100. Most of those restorations (cheap units, removed
+  late) barely changed the breach rate (17 → 16/100). The rate only fell once the restoring
+  reached units U014–U023. **Reverse-order restoration is inefficient here.** One alternative is
+  to restore by each unit's effect on breaches.
+- The final design removes 12 units: the Shelemar, Shamrock Gardens, Nita Downs Homestead and
+  Pivot 1/2 fences (5 of the 8 fences), and 7 tanks.
+- **Problem: in the model, removing a fence makes its site *safer*.** A fenced unit is a big
+  target: its effective radius `r.eff` comes from the fenced area (Shelemar 3.9 km), thinned by
+  `p.breach` (Shelemar 0.31). `apply_design()` turns a removed fence into one ordinary point with
+  r = 100 m, so its catchment area falls about 1,500-fold. Removing a fence therefore cuts
+  arrivals rather than raising them. This is why the most expensive fences go first. Fence
+  removal has to be modelled differently before the fence results mean anything.
+- Many single removals breach on their own (143 of 197 candidates kept). Natural points never
+  dry yet, so they act as permanent stepping stones. Expect this to change a lot in step 5.
+
+Decisions (project lead, 2026-11-26):
+- **A removed fence keeps its effective radius**, everywhere (Shelemar included). The wet area is
+  still as big a target; only the breach thinning and the control test go. `apply_design()` no
+  longer clears `r.eff`.
+- **Restoration rule: decide after step 5.** Keep reverse order until then.
+
+Second run, with removed fences keeping their radius (2026-11-26, 2 min 12 s):
+
+| Design | Units kept | Cost | Breaches /100 (95% upper) | Point-years (all points) | Point-years avoided | CE (avoided per $M) |
+|---|---|---|---|---|---|---|
+| Do nothing | 0 | $0 | 100 | 33,775 | — | — |
+| Full | 261 | $16.52M | 0 (3.6%) | 16,343 | 17,432 | 1,055 |
+| Optimised | 252 | $12.27M | **2** (7.0%) | 16,973 | 16,802 | 1,370 |
+
+- The screening removed 47 units (4 of 8 fences, 43 tanks). The confirmation found 27/100
+  breaches, and restoring in reverse order put back 38 units ($2.65M) before it reached 0/100.
+- The final design removes 9 units, saving $4.26M: the Shelemar, Shamrock Gardens and Nita Downs
+  Homestead fences, plus 6 tanks (U003–U006, U008, U009). The Shelemar and Shamrock Gardens
+  fences can still go even with their radius kept, which suggests these sites are off the main
+  invasion path.
+- The optimised design passed its confirmation (0/100), but the independent evaluation (a
+  separate seed block) found **2/100 breaches**. "Zero in 100" only bounds the breach risk at
+  about 3.6%, and this design's true risk looks to be around 2%. Worth weighing when the
+  restoration rule is decided.
