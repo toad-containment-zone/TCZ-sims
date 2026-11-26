@@ -74,8 +74,25 @@ when we start it, and this file is updated as steps change or finish.
 
 ## Open questions
 
-- **Costs:** eradication responses are costed from step 6 (one night per response, an
-  assumption to confirm). Maintenance costs are still 0: are there any?
+- **Costs:** eradication responses are costed from step 6 at $37,469 per erad-unit per response.
+- **To do: maintenance costs for fences and tanks** (project lead, 2026-11-27). Calculate a
+  50-year maintenance cost for each unit and add it to that unit's capital cost, so it counts in
+  the cost totals and in the screening and restoration ranking.
+  - Fences would likely scale with fence length and gates (`distance`, `n.gates` are already on
+    the units). Tanks would be a per-unit figure.
+  - `design_cost(maintenance.per.year=)` is a flat per-unit hook that defaults to 0. Replace it
+    with a per-unit `maintenance` column on `tcz-units`, built in `build_tcz_units()` from the
+    cost workbook.
+  - Do this together with the ranking item below, since both change the cost each unit is ranked
+    on.
+- **Screening and restoration rank units on capital cost only.** Eradication is now most of a
+  fence's cost: the full design's $18.3M of eradication against $16.5M of capital. Ranking
+  fences by capital + expected eradication cost could change which units are tested first and
+  which are restored. Worth doing before the design is final.
+- **"Shamrock Stn Pivots" fence** (on `fence-lengths` from 2026-11-27: 19.5 km, 3 gates, 7
+  erad-units) has no `Site.ID`, audit record or cost, so it's left out (project lead,
+  2026-11-27). Add it once it's in the audit. At 7 erad-units it would cost about $262k per
+  response.
 - **Uncosted works:** "Erin B yards" and "Refuse tip" have works planned but no cost, so they are
   fixed points. Five more uncosted records sit in units that do have a cost. Two cost rows ("Two
   tree well", "Sea Ranger base", $20k each) match no audit record and are excluded.
@@ -467,8 +484,10 @@ Decisions (project lead, 2026-11-27):
 - **Eradication costs** (added by the project lead to "Draft QRA data - Fencing unit rates.xlsx"):
   - each fence has `erad.units` (two-person crews with a quad bike needed to cover it in a
     night): Shelemar 8, Shamrock Gardens 2, Shamrock Stn Homestead 1, the others 0.5;
-  - an erad-unit costs $1,800 a night (personnel $1,400, quad bike $150, vehicle $250);
-  - **one response = one night** is my assumption, still to confirm.
+  - an erad-unit costs $1,800 a day (personnel $1,400, quad bike $150, vehicle $250);
+  - a response takes 20.8 days per erad-unit (the workbook's "Eradication-days-calculations":
+    N₀ = 700, detection probability 0.27), so **$37,469 per erad-unit per response** (updated by
+    the project lead, 2026-11-27, replacing a first run that assumed one night per response).
 
 Changes:
 - Merged `main` (`59da87c`): the static forecast site replaces the Shiny app. The conflicts were
@@ -498,39 +517,37 @@ Checks:
 - Forcing step 5's 38 screened removals and applying best-value restoration put back 16 units
   ($1.87M), against reverse order's 32 ($2.75M).
 
-Results (2026-11-27, 7.0 min on 8 cores):
+Results (2026-11-27, 6.5 min on 8 cores, at $37,469 per erad-unit per response):
 
 | Design | Units kept | Capital | Eradication | Total cost | Breaches /1000 (95% upper) | Point-years avoided | CE (avoided per $M) | Eradications / run |
 |---|---|---|---|---|---|---|---|---|
 | Do nothing | 0 | $0 | $0 | $0 | 1000 | — | — | 0 |
-| Full | 261 | $16.52M | $0.88M | $17.40M | 0 (0.37%) | 17,748 | 1,020 | 141 |
-| Optimised | 244 | $12.41M | $0.11M | $12.52M | **1** (0.56%) | 17,408 | 1,391 | 103 |
+| Full | 261 | $16.52M | $18.32M | $34.85M | 0 (0.37%) | 17,748 | 509 | 141 |
+| Optimised | 244 | $12.41M | $2.33M | $14.74M | **1** (0.56%) | 17,408 | 1,181 | 103 |
 
 - The screening removed 23 units (2 fences, 21 tanks). The confirmation found 38/1000 breaches.
   Best-value restoration put back 6 units ($0.84M): U042, U159, U010, U009, U060 and U006. It
   reached 0/1000 after six rounds.
-- **The final design removes 17 units, saving $4.12M capital ($4.88M total):**
+- **The final design removes 17 units, saving $4.12M capital and $20.11M in total:**
   - the Shelemar (U001) and Shamrock Gardens (U002) fences;
   - 15 tanks: U003, U004, U008, U022, U026, U039, U069, U071, U120, U121, U123, U136, U158, U161,
     U190.
 - The independent 1,000-run evaluation found **1 breach** (p ≈ 0.001, 95% upper 0.56%). That is
   consistent with the confirmation's 0/1000, and the residual risk is far below step 5's
   (1/100).
-- Removing the two big fences removes most of the eradication cost ($0.88M → $0.11M), because
-  Shelemar and Shamrock Gardens cost 8 and 2 erad-units per response.
-- **Sensitivity to nights per response** (eradication cost scaled post hoc; the design is
-  unchanged, since the screening order uses capital cost):
-
-  | Nights per response | Full: cost, CE | Optimised: cost, CE |
-  |---|---|---|
-  | 1 | $17.40M, 1,020 | $12.52M, 1,391 |
-  | 3 | $19.16M, 926 | $12.74M, 1,366 |
-  | 5 | $20.92M, 848 | $12.97M, 1,343 |
+- **Eradication is now the largest cost of the full design.** Shelemar (8 erad-units, about
+  $300k per response) and Shamrock Gardens (2) are colonised often. Removing them cuts the
+  eradication cost from $18.3M to $2.3M. Most of the gain in CE (509 → 1,181) comes from that,
+  not from the capital saved.
+- The design is the same as in the first step 6 run (one night per response). Screening and
+  restoration rank units on capital cost, and eradication cost only enters the reported totals.
+  See "Open questions".
 
 Still open for the write-up (methods):
 - the Geoscience Australia dataset names ("XX and YY") and the "step out details";
 - the soak count (XX);
 - full references for Dunlop et al., Brown et al. and Phillips, Dempster et al.;
-- the year for "Southwell et al. (2016)": the J. Appl. Ecol. paper is in the 2017 volume;
-- the telemetry years: the text says 2006–8, but the January–March fixes in `gregsData.txt` run
-  2005–2010.
+
+Fixed since: Southwell et al. is now 2017 throughout, and the telemetry dates read "wet seasons
+(January–March) of 2005–2010", to match `gregsData.txt` (project lead, 2026-11-27). The remaining
+gaps the project lead will fill.

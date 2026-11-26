@@ -10,7 +10,7 @@ ndays<-250 #days over which to convolve
 d<-read.table("dat/gregsData.txt", header=T, sep="\t")
 d$date<-as.POSIXct(d$date*24*60*60, origin=as.Date("1904-1-1"))
 
-#Grab only data from Jan-March 2005/2006
+#Grab only data from Jan-March (wet-season fixes span 2005-2010)
 d<-subset(d, d$month<=3)
 
 # make into track object
