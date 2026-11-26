@@ -31,20 +31,23 @@ apply_design <- function(st, remove) {
 # `breach` is then meaningful); use FALSE for point-years over the full horizon.
 eval_design <- function(st, pairs, n, gens = 50, stop.on.target = TRUE, seed = 1,
                         tcz.rows = rep(FALSE, nrow(st)), drying.matrix = NULL,
-                        pairs.extreme = NULL, extreme.ref = NULL,
+                        pairs.extreme = NULL, extreme.ref = NULL, drying.spec = NULL,
                         cores = max(1, detectCores() - 2)) {
   one_run <- function(r) {
     set.seed(seed + r)
     lambda <- 10^rnorm(1, mean = sample.lambda, sd = sample.lambda.sd) # as in run_sims()
-    start <- NA; extreme.years <- NULL
-    if (!is.null(extreme.ref)) { # random start in the reference years, as in run_sims()
-      start <- sample.int(length(extreme.ref), 1)
-      extreme.years <- extreme.ref[year_index(length(extreme.ref), gens, start)]
+    start <- NA; extreme.years <- NULL; drying.run <- drying.matrix
+    n.ref <- if (!is.null(extreme.ref)) length(extreme.ref) else if (!is.null(drying.spec)) nrow(drying.spec$x1) else NA
+    if (!is.na(n.ref)) { # random start in the reference years, as in run_sims()
+      start <- sample.int(n.ref, 1)
+      idx <- year_index(n.ref, gens, start)
+      if (!is.null(extreme.ref)) extreme.years <- extreme.ref[idx]
+      if (!is.null(drying.spec)) drying.run <- draw_drying_matrix(drying.spec, idx, draw_drying_beta(drying.spec))
     }
     invisible(capture.output( # silence spread.pilb()'s progress bar
       out <- spread.pilb(pop = st, gens = gens, pairs = pairs, delta = lambda, r = 10^2,
                          plot = FALSE, rollup = FALSE, control.step = TRUE,
-                         stop.on.target = stop.on.target, drying.matrix = drying.matrix,
+                         stop.on.target = stop.on.target, drying.matrix = drying.run,
                          pairs.extreme = pairs.extreme, extreme.years = extreme.years)
     ))
     pm <- out$popmatrix
@@ -74,7 +77,7 @@ design_cost <- function(units.sim, remove, years = 50, maintenance.per.year = 0,
 greedy_backward <- function(st, pairs, units.sim, n.screen = 20, n.confirm = 100, gens = 50,
                             seed = 20261126, max.candidates = Inf,
                             cores = max(1, detectCores() - 2), drying.matrix = NULL,
-                            pairs.extreme = NULL, extreme.ref = NULL) {
+                            pairs.extreme = NULL, extreme.ref = NULL, drying.spec = NULL) {
   cand <- which(units.sim$candidate %in% TRUE)
   ord <- cand[order(-units.sim$cost[cand], units.sim$unit_id[cand])]
   ord <- ord[seq_len(min(length(ord), max.candidates))]
@@ -87,7 +90,8 @@ greedy_backward <- function(st, pairs, units.sim, n.screen = 20, n.confirm = 100
     trial <- remove; trial[row] <- TRUE
     ev <- eval_design(apply_design(st, trial), pairs, n.screen, gens = gens, stop.on.target = TRUE,
                       seed = seed, cores = cores, drying.matrix = drying.matrix,
-                      pairs.extreme = pairs.extreme, extreme.ref = extreme.ref)
+                      pairs.extreme = pairs.extreme, extreme.ref = extreme.ref,
+                      drying.spec = drying.spec)
     n.breach <- sum(ev$breach)
     if (n.breach == 0) remove <- trial
     log[[k]] <- data.frame(step = k, unit_id = units.sim$unit_id[row], row = row,
@@ -109,7 +113,8 @@ greedy_backward <- function(st, pairs, units.sim, n.screen = 20, n.confirm = 100
   repeat {
     conf <- eval_design(apply_design(st, remove), pairs, n.confirm, gens = gens, stop.on.target = TRUE,
                         seed = seed + 1e6, cores = cores, drying.matrix = drying.matrix,
-                      pairs.extreme = pairs.extreme, extreme.ref = extreme.ref)
+                      pairs.extreme = pairs.extreme, extreme.ref = extreme.ref,
+                      drying.spec = drying.spec)
     n.breach <- sum(conf$breach)
     cat(sprintf("Confirmation: %d/%d breaches with %d units removed\n", n.breach, n.confirm, sum(remove)))
     if (n.breach == 0) break

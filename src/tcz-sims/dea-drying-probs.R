@@ -1,3 +1,6 @@
+# SUPERSEDED (2026-11-26) by drying-model.R, which the TCZ pipeline uses (100 m match, Jun-Dec,
+# SILO rainfall from rain-years.R, TO-primary drying classes). Kept for reference; not sourced.
+#
 # dea-drying-probs.R
 #
 # Queries the Digital Earth Australia (DEA) Waterbodies API to derive

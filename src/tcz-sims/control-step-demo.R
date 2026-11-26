@@ -11,6 +11,8 @@
 #   D. Eradication responses: each occupied fence found at the annual audit is counted once.
 #   E. Extreme-wet-year kernel: extreme.years all FALSE reproduces a standard run exactly (same seed);
 #      all TRUE, with a wetter extreme kernel, colonises distant targets more often.
+#   F. Natural drying: a drying matrix of 1s empties every pre-colonised natural point, 0s none;
+#      draw_drying_matrix() gives p.avg at zero rainfall anomaly and 0 for "never" points.
 #   C. Fence breach-thinning: fenced target points (r.eff == r, isolating p.breach's effect) get
 #      colonised less often than otherwise-identical unfenced targets at the same distance, by
 #      about the amount Binom(c, p.breach) thinning predicts. Uses a realistic, small p.breach
@@ -187,3 +189,21 @@ ext.rate <- mean(sapply(1:200, function(k) mean(run_E(TRUE, k)[far.idx, "Pres"])
 cat(sprintf("Colonisation rate of targets %d m away: standard %.3f, extreme %.3f\n", far.dist, std.rate, ext.rate))
 stopifnot(ext.rate > std.rate)
 cat("Extreme kernel check passed\n")
+
+######## F. Natural-point drying ########
+cat("\n== F. Natural-point drying ==\n")
+source("src/tcz-sims/drying-model.R")
+n.att <- nrow(attrition.table)
+nat.rows <- attrition.table[, "nats"] == 1
+run_F <- function(p) spread.pilb(pop = attrition.table, gens = 1, pairs = attrition.pairs, delta = 0, r = r,
+                                 rollup = FALSE, control.step = TRUE,
+                                 drying.matrix = matrix(p, nrow = 1, ncol = n.att))$popmatrix
+stopifnot(all(run_F(1)[nat.rows, "Pres"] == 0), all(run_F(0)[nat.rows, "Pres"] == 1))
+cat("Drying matrix of 1s empties natural points, 0s leaves them: TRUE\n")
+fake.spec <- list(class = c("never", "sometimes", "sometimes"), sometimes = c(FALSE, TRUE, TRUE),
+                  x1 = matrix(c(0, 0, 0, 0, 1, -1), nrow = 2, byrow = TRUE),
+                  x2 = matrix(0, nrow = 2, ncol = 3), p.avg = 0.25, beta = c(-1.3, -0.8))
+dm <- draw_drying_matrix(fake.spec, idx = c(1, 2))
+stopifnot(all(dm[, 1] == 0), isTRUE(all.equal(dm[1, 2:3], c(0.25, 0.25))),
+          dm[2, 2] < 0.25, dm[2, 3] > 0.25)
+cat("draw_drying_matrix(): p.avg at zero anomaly, wetter -> less drying, never -> 0: TRUE\n")

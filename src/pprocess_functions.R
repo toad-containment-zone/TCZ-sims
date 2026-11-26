@@ -285,7 +285,8 @@ year_index <- function(n.ref, gens, start) ((start - 1 + seq_len(gens) - 1) %% n
 run_sims <- function(n.sims = 100, gens, plot = FALSE, rollup,
                       control.step = FALSE, stop.on.target = TRUE, drying.matrix = NULL,
                       pairs.extreme = NULL, # extreme-wet-year dispersal matrix (setup(rain.extreme.id=))
-                      extreme.ref = NULL) { # logical, one per reference year: is it an extreme wet year?
+                      extreme.ref = NULL, # logical, one per reference year: is it an extreme wet year?
+                      drying.spec = NULL) { # natural-point drying (drying-model.R drying_spec()); overrides drying.matrix
   # each rep starts at a random year of the reference and wraps round it (rain-years.R)
   if (control.step && rollup) stop("rollup and control.step cannot both be TRUE -- control-step scenarios must process every site every generation")
   output<-vector("list", length=n.sims) # vector to take outputs
@@ -294,13 +295,16 @@ run_sims <- function(n.sims = 100, gens, plot = FALSE, rollup,
     cat("Rep ", rr, " of ", n.sims, "\n")
     lambda.samp<-10^rnorm(1, mean=sample.lambda, sd=sample.lambda.sd)
     r.samp<-10^2
-    start <- NA; extreme.years <- NULL
-    if (!is.null(extreme.ref)) {
-      start <- sample.int(length(extreme.ref), 1)
-      extreme.years <- extreme.ref[year_index(length(extreme.ref), gens, start)]
+    start <- NA; extreme.years <- NULL; drying.rep <- drying.matrix
+    n.ref <- if (!is.null(extreme.ref)) length(extreme.ref) else if (!is.null(drying.spec)) nrow(drying.spec$x1) else NA
+    if (!is.na(n.ref)) {
+      start <- sample.int(n.ref, 1)
+      idx <- year_index(n.ref, gens, start)
+      if (!is.null(extreme.ref)) extreme.years <- extreme.ref[idx]
+      if (!is.null(drying.spec)) drying.rep <- draw_drying_matrix(drying.spec, idx, draw_drying_beta(drying.spec))
     }
     temp<-spread.pilb(pop=spread.table, gens=gens, pairs=pairs, delta=lambda.samp, r=r.samp, plot = plot, rollup = rollup,
-                       control.step = control.step, stop.on.target = stop.on.target, drying.matrix = drying.matrix,
+                       control.step = control.step, stop.on.target = stop.on.target, drying.matrix = drying.rep,
                        pairs.extreme = pairs.extreme, extreme.years = extreme.years)
     temp<-c(temp, list(pars=cbind(lambda=lambda.samp, r=r.samp), start = start))
     output[[rr]]<-temp

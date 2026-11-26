@@ -1,7 +1,7 @@
 # Shared setup for the TCZ scenarios (tcz-sims.R, tcz-optimise.R): loads data, defines the
 # simulation region and colonised/target points, runs setup(), and checks the intervention units.
-# Leaves spread.table, pairs, pairs.extreme, rain.years and tcz.units.sim (unit metadata per
-# spread.table row) in the session.
+# Leaves spread.table, pairs, pairs.extreme, rain.years, drying.spec and tcz.units.sim (unit
+# metadata per spread.table row) in the session.
 
 ######## load functions and libraries ########
 source("src/tcz-sims/load-data.R") # provides tcz.points: TCZ audit records as intervention units (build-tcz-units.R)
@@ -107,6 +107,18 @@ if (!setequal(na.omit(sim.unit), tcz.units$unit_id)) {
        paste(setdiff(tcz.units$unit_id, sim.unit), collapse = ", "))
 }
 stopifnot(all(spread.table[is.na(sim.unit), "control.type"] == CONTROL_NONE))
+######## natural-point drying (drying-model.R) ########
+# TO assessment decides whether a point dries; DEA (via the glmer) only how drying responds to rainfall
+source("src/tcz-sims/drying-model.R")
+dea.annual <- dea_drying(living.waters)
+drying.response <- fit_drying_response(dea.annual, rain_years(attr(dea.annual, "points")))
+if (drying.response$singular || any(drying.response$beta >= 0))
+  stop("drying glmer is singular or has non-negative rainfall slopes; check before using it")
+sim.rows <- spread.table[, "ID"] # spread.table rows -> tcz.points rows (after de-duplication)
+drying.spec <- drying_spec(st_drop_geometry(tcz.points)[sim.rows, ], rain.years$point.cell[sim.rows],
+                           rain.years, drying.response, p.avg = 0.25)
+stopifnot(all(drying.spec$class[spread.table[, "nats"] == 0] == "never")) # only natural points can dry
+
 # unit metadata aligned row-for-row with spread.table (NA rows = not a TCZ unit), for the optimiser
 tcz.units.sim <- st_drop_geometry(tcz.units)[match(sim.unit, tcz.units$unit_id),
                                              c("unit_id", "cost", "candidate", "control.type")]

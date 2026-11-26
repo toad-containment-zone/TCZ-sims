@@ -55,7 +55,7 @@ when we start it, and this file is updated as steps change or finish.
      5% chance of failing. The fence only emits toads (λ) the next year if eradication fails.
      At the moment the code treats fences like tanks, with a flat `control.fail.prob`.
    - In the top 20% of wet years, use a dispersal kernel built from the most rainy days on record.
-5. **Drying data into the model.**
+5. **Drying data into the model.** ✅ Done 2026-11-26 (see below). The approach changed from the original plan: Traditional Owner assessment decides whether a point dries, DEA only how drying responds to rainfall.
    - Load the survey data.
    - Calibrate the survey's `group_assessment` (Always Wet / Sometimes Dry / Don't Know) against DEA
      drying, using the long-run drying probability from `fit_drying`. Rewrite the methods text to
@@ -354,3 +354,68 @@ Decision (project lead, 2026-11-26): **keep `days.per.rain = 4`.** It's what bot
 calibrations used, and it matches the original Tingley et al. formula (`r + 3r(1 − overlap)`:
 movement on the rainy day plus the three following days, a 4-day window). The methods text said
 "three days of movement" and now describes the 4-day window instead. No code change.
+
+### Step 5 — natural-point drying
+
+Findings (2026-11-26):
+- 10 of the 35 Living Waters points are within 100 m of a DEA waterbody (463 in the region): 7
+  Always Wet, 1 Sometimes Dry, 1 Don't Know, 1 blank.
+- **DEA contradicts the TO assessment.** The waterbodies at the "Always Wet" points reach 0% open
+  water in 75–100% of dry seasons (1987–2026), and the "Sometimes Dry" one in every season. DEA
+  sees open surface water across the polygon, not the persistent water toads use.
+- `dea-drying-probs.R` didn't match the methods: it matched within 1,000 m, and the comment on its
+  months didn't match the code. All 141 LaGrange natural points outside the TCZ are flagged
+  "Perennial".
+
+Decisions (project lead, 2026-11-26):
+- **TO-primary.** "Always Wet" never dries. "Sometimes Dry", "Don't Know" and blank Living Waters
+  points dry with probability logit p = logit(**0.25**) + b₁·x₁ + b₂·x₂, where x₁ and x₂ are the
+  current and previous wet-season rainfall anomalies from the point's own reference mean. b₁ and
+  b₂ come from the DEA glmer, so DEA sets only the rainfall response.
+- Natural points with no TO assessment (LaGrange and aerial-imagery points, all outside the TCZ)
+  never dry. The Living Waters rule takes precedence, so blank Living Waters records outside the
+  TCZ are treated as Sometimes Dry.
+
+Changes:
+- New `src/tcz-sims/drying-model.R`:
+  - `dea_drying()`: 100 m match, Jun–Dec, cached in `dat/dea-drying-cache.RData`;
+  - `fit_drying_response()`: the glmer, with SILO rainfall from `rain-years.R`;
+  - `drying_spec()`, `draw_drying_matrix()` and `draw_drying_beta()`.
+- `run_sims(drying.spec=)` and `eval_design(drying.spec=)` draw (b₁, b₂) from their sampling
+  distribution for each run, and use that run's random start. Drying and the extreme kernel follow
+  the same year sequence.
+- `tcz-setup.R` builds `drying.spec` aligned with `spread.table`, and stops if the glmer is
+  singular or a slope isn't negative.
+- `dea-drying-probs.R` and `rainfall-drying-model.R` are marked superseded.
+- Demo check F.
+- Methods: "Auditing natural waterpoints" is rewritten (**a draft for the project lead to review**).
+
+Results:
+- **glmer:** 10 sites, 258 site-years (2001–2026), not singular.
+  - b₁ (current wet season) = −1.30 per SD (213 mm), SE 0.29;
+  - b₂ (previous wet season) = −0.78 per SD (253 mm), SE 0.26;
+  - site SD 1.48.
+- **Drying classes:**
+  - inside the TCZ, 10 natural points never dry (Always Wet) and 10 sometimes dry (7 Sometimes
+    Dry, 3 Don't Know);
+  - outside the TCZ, 8 sometimes dry (Living Waters) and 155 never dry.
+- **Drying probability by reference year** (mean over "sometimes" points): it ranges from 0.01
+  (2018) to 0.72 (2016), and the mean over years is 0.31. The extreme years dry least (0.01–0.18).
+- **Baseline: full implementation:** 0/100 breaches. Mean point-years inside the TCZ 522 (step 4:
+  647): natural 483 (was 604), tank 32, fence 7.
+- **Optimiser** (1.6 min):
+
+  | Design | Units kept | Cost | Breaches /100 (95% upper) | Point-years avoided | CE (avoided per $M) | Eradications / run |
+  |---|---|---|---|---|---|---|
+  | Do nothing | 0 | $0 | 100 | — | — | 0 |
+  | Full | 261 | $16.52M | 0 (3.6%) | 17,756 | 1,075 | 142 |
+  | Optimised | 255 | $12.91M | **1** (5.4%) | 17,358 | 1,345 | 153 |
+
+  - The screening removed 38 units (5 fences, 33 tanks). The confirmation found 18/100 breaches,
+    and reverse-order restoration put back 32 ($2.75M).
+  - The final design removes 6 units, saving $3.61M: the Shelemar and Shamrock Gardens fences,
+    plus tanks U003–U006.
+  - The independent 100-run evaluation found 1 breach.
+- Drying cuts natural point-years by about 20%, but the 10 "Always Wet" points inside the TCZ
+  stay permanent stepping stones. The design changes little from step 4 (one more tank, U006,
+  removed).

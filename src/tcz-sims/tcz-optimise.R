@@ -1,7 +1,8 @@
 # tcz-optimise.R
 #
 # Optimises the TCZ design (ms/tcz-optimisation-methods.qmd, "Cost optimisation"):
-# With the extreme-wet-year kernel (rain-years.R) and fence eradication responses counted.
+# With the extreme-wet-year kernel (rain-years.R), natural-point drying (drying-model.R) and fence
+# eradication responses counted.
 #   1. do-nothing counterfactual (every intervention removed) and full design, 100 full-horizon runs each
 #   2. backward greedy search (most expensive first, 20 runs per test) + 100-run confirmation,
 #      restoring removed units in reverse order while the confirmation finds breaches
@@ -49,7 +50,8 @@ summarise_design <- function(name, ev, remove) {
 eval_full <- function(remove, seed.offset) {
   eval_design(apply_design(st, remove), pairs, n.eval, stop.on.target = FALSE,
               seed = seed + seed.offset, tcz.rows = tcz.rows,
-              pairs.extreme = pairs.extreme, extreme.ref = rain.years$ref$extreme)
+              pairs.extreme = pairs.extreme, extreme.ref = rain.years$ref$extreme,
+              drying.spec = drying.spec)
 }
 
 ######## 1. counterfactual and full design ########
@@ -63,7 +65,8 @@ ev.full <- eval_full(none, 2e6)
 cat("Greedy search...\n")
 greedy <- greedy_backward(st, pairs, tcz.units.sim, n.screen = n.screen, n.confirm = n.confirm,
                           seed = seed, max.candidates = max.cand,
-                          pairs.extreme = pairs.extreme, extreme.ref = rain.years$ref$extreme)
+                          pairs.extreme = pairs.extreme, extreme.ref = rain.years$ref$extreme,
+              drying.spec = drying.spec)
 
 ######## 3. optimised design ########
 cat("Optimised design...\n")
