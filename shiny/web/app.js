@@ -71,6 +71,9 @@
   // Broome: many users live there and the basemap labels it only faintly.
   map.createPane('towns');
   map.getPane('towns').style.zIndex = 460;
+  // With preferCanvas, this pane gets its own map-sized canvas above the
+  // waterpoints; let clicks pass through it or no dot popup ever opens.
+  map.getPane('towns').style.pointerEvents = 'none';
   L.circleMarker(BROOME, {
     pane: 'towns', radius: 6, color: '#1c2b33', weight: 2, fillColor: '#ffffff', fillOpacity: 1,
     interactive: false
