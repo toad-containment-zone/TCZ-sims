@@ -10,7 +10,6 @@ ms/*.html
 dat/
 .positai
 *.Rproj
-shiny/site/
 
 /.quarto/
 **/*.quarto_ipynb
