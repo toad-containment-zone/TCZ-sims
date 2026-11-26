@@ -2,7 +2,7 @@
 # to test various control scenarios for efficacy and optimise investment in control interventions
 
 ######## load functions and libraries ########
-source("src/tcz-sims/load-data.R")
+source("src/tcz-sims/load-data.R") # provides tcz.points: TCZ audit records as intervention units (build-tcz-units.R)
 
 ######## filter to TCZ region ########
 # buffer TCZ by 80km (project to Albers for metric distances, then back)
@@ -10,19 +10,19 @@ tcz_buffer_80 <- tcz.boundary |>
   st_transform(3577) |>
   st_buffer(80000) |>
   st_union() |>
-  st_transform(st_crs(all.points))
+  st_transform(st_crs(tcz.points))
 
-all.points <- all.points[st_within(all.points, tcz_buffer_80, sparse = FALSE)[, 1], ]
+tcz.points <- tcz.points[st_within(tcz.points, tcz_buffer_80, sparse = FALSE)[, 1], ]
 
 ######## define colonised and target points ########
 # Use TCZ bounding box to define north/south: 
 #   north of TCZ → already colonised (colonised = 1)
 #   south of TCZ → target points    (colonised = 2)
-tcz_bbox   <- st_bbox(st_transform(tcz.boundary, st_crs(all.points)))
-pt_y       <- st_coordinates(all.points)[, "Y"]
-within_tcz <- st_within(all.points, tcz.boundary, sparse = FALSE)[, 1]
+tcz_bbox   <- st_bbox(st_transform(tcz.boundary, st_crs(tcz.points)))
+pt_y       <- st_coordinates(tcz.points)[, "Y"]
+within_tcz <- st_within(tcz.points, tcz.boundary, sparse = FALSE)[, 1]
 
-all.points <- all.points |>
+tcz.points <- tcz.points |>
   mutate(
     colonised = case_when(
       within_tcz                 ~ 0L,  # inside TCZ → uncolonised simulation space
@@ -32,9 +32,8 @@ all.points <- all.points |>
     ),
     origin_des = (origin_des == "Natural"), # to match logical required of setup()
     control.type = case_when(
-      within_tcz & !origin_des & !is.na(distance) ~ "fence", # matched fence-lengths sheet
-      within_tcz & !origin_des                     ~ "tank",  # manmade, TCZ, no fence record
-      TRUE                                          ~ "none"  # natural, or outside TCZ
+      within_tcz & !origin_des ~ control.type, # TCZ intervention unit: "fence" or "tank" from build_tcz_units()
+      TRUE                     ~ "none"        # natural, or outside TCZ
     ),
     fence.units = coalesce(distance, 0) / 1000 + coalesce(n.gates, 0), # distance is metres -> km, + gate count
     fence.area = if_else(control.type == "fence", (distance / 4)^2, NA_real_), # distance = full perimeter (m); assume square -> side = distance/4, area = side^2
@@ -49,7 +48,7 @@ ggplot() +
   geom_sf(data = wa.coast, fill = NA, color = "grey30") +
   geom_sf(data = tcz_buffer_80, fill = NA, color = "blue", lty = 2) +
   geom_sf(data = tcz.boundary, fill = NA, color = "red") +
-  geom_sf(data = all.points,
+  geom_sf(data = tcz.points,
           aes(color = factor(colonised,
                              levels = c(0, 1, 2),
                              labels = c("Uncolonised (TCZ)", "Colonised (N)", "Target (S)")),
@@ -72,7 +71,7 @@ load("dat/Posteriors_2026.RData")
 
 ######## tcznfull-imlementation scenario ########
 scen.name <- "tcz-full"
-setup(point.data = all.points, 
+setup(point.data = tcz.points, 
       X.id = "X", 
       Y.id = "Y",
       present.id = "colonised",
@@ -85,6 +84,20 @@ setup(point.data = all.points,
       control.type.id = "control.type",
       fence.area.id = "fence.area",
       fence.units.id = "fence.units")
+
+# every TCZ intervention unit must survive setup()'s spatial de-duplication, and nothing outside
+# the TCZ may carry a control
+stopifnot(all(!is.na(tcz.points$unit_id[!is.na(tcz.points$control.type) & tcz.points$control.type != "none"])),
+          sum(tcz.points$control.type != "none") == nrow(tcz.units))
+sim.unit <- tcz.points$unit_id[spread.table[, "ID"]]
+if (!setequal(na.omit(sim.unit), tcz.units$unit_id)) {
+  stop("TCZ units dropped by setup() de-duplication: ",
+       paste(setdiff(tcz.units$unit_id, sim.unit), collapse = ", "))
+}
+stopifnot(all(spread.table[is.na(sim.unit), "control.type"] == CONTROL_NONE))
+# unit metadata aligned row-for-row with spread.table (NA rows = not a TCZ unit), for the optimiser
+tcz.units.sim <- st_drop_geometry(tcz.units)[match(sim.unit, tcz.units$unit_id),
+                                             c("unit_id", "cost", "candidate", "control.type")]
 
 # write out points for basemapping
 write.csv(spread.table, file = "out/basemap_points.csv", row.names = FALSE)

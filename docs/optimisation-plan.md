@@ -21,7 +21,7 @@ when we start it, and this file is updated as steps change or finish.
   (fence if it has a fence-length record, otherwise tank).
 - **Built, but separate from the simulation:** `dea-drying-probs.R` → `rainfall-drying-model.R`
   (`fit_drying`, `predict_drying()`).
-- **Data:** the Traditional Owner drying survey data has arrived (2026-11) but isn't loaded yet.
+- **Data:** the drying survey's per-point answers are in the updated Living Waters layer (`group_assessment`), loaded in step 2 but not yet used.
 - **Baseline:** `out/tcz-full.*` was regenerated in step 1 (2026-11-26) with tanks and fences in the run.
 
 ## Steps
@@ -33,7 +33,7 @@ when we start it, and this file is updated as steps change or finish.
    - Make the colonisation threshold the same in the code (`realised_n > 2`) and the methods
      ("failed when c ≥ 2").
    - Re-run `tcz-sims.R` with `stop.on.target=FALSE`.
-2. **Tidy the infrastructure data and costs (`load-data.R`).**
+2. **Tidy the infrastructure data and costs (`load-data.R`).** ✅ Done 2026-11-26 (see below).
    - Inside the TCZ: one row per artificial site (`X_record_id` in `tcz.sites`) and one per natural
      point (Living Waters, plus soaks).
    - Outside the TCZ: every point gets no control, so colonised artificial points outside the TCZ
@@ -57,8 +57,9 @@ when we start it, and this file is updated as steps change or finish.
    - In the top 20% of wet years, use a dispersal kernel built from the most rainy days on record.
 5. **Drying data into the model.**
    - Load the survey data.
-   - Calibrate the survey categories (never / some / most / every year) against DEA drying, using
-     an ordered logistic model on the long-run drying probability from `fit_drying`.
+   - Calibrate the survey's `group_assessment` (Always Wet / Sometimes Dry / Don't Know) against DEA
+     drying, using the long-run drying probability from `fit_drying`. Rewrite the methods text to
+     match these categories.
    - Predict drying for points without a DEA match.
    - Build the waterpoint × year drying matrix (a 25-year rainfall reference, repeated to 50
      years) and pass it to `run_sims(drying.matrix=)`.
@@ -71,10 +72,11 @@ when we start it, and this file is updated as steps change or finish.
 
 ## Open questions
 
-- **Survey data:** where it lives under `DATA_PATH`, how it's laid out, and whether it adds soaks
-  beyond the 33 Living Waters points.
-- **Costs:** are there maintenance costs, or a cost per eradication response? The PCR001 sheet has
+- **Costs:** are there maintenance costs, or a cost per eradication response? The cost sheet has
   only `Cost/Site`. Until there are, these are parameters that default to 0.
+- **Uncosted works:** "Erin B yards" and "Refuse tip" have works planned but no cost, so they are
+  fixed points. Five more uncosted records sit in units that do have a cost. Two cost rows ("Two
+  tree well", "Sea Ranger base", $20k each) match no audit record and are excluded.
 - **Gates:** `fence-lengths` already has `n.gates` for all 8 fenced areas. Confirm that's complete.
 
 ## Detailed step plans
@@ -138,3 +140,62 @@ the baseline numbers are written here.
   dry, because `surv.prob` = 1 until step 5. Expect this to fall once the drying data is in.
 - Run time: about 3 min per 100 runs × 50 years on a laptop (about 2 s per run). For step 3:
   one greedy pass over about 267 interventions × 20 runs is about 3 h.
+
+### Step 2 — infrastructure units and costs
+
+Findings (2026-11-26):
+- The cost workbook moved. The new one (`Activity Steps Toad project - 4 crew - 9Jul26.xlsx`,
+  sheet "Analysis") has the same 202 sites. Each `Cost/Site` is 0.583 × the old value, because it
+  now spreads only the direct infrastructure cost ($16.56M), not the whole project ($28.41M).
+- `setup()`'s 100 m de-duplication was silently dropping 10 of the 277 audit records, 5 of them
+  with costs (about $0.76M).
+- Shelemar's fence was split across records. The fence-lengths row points at "Homestead" (no
+  cost); the $1.83M cost sits on "Perimeter fence", which was modelled as a tank. The project lead
+  confirmed that the homestead, P6 bore, P3 bore, Roper 1 and 2 bores and Typical valve
+  installation are inside the fence. The points near the Nita Downs Pivot 2 and Shamrock Gardens
+  fences are outside them.
+- Decision: the 69 "Nothing" records are fixed controlled points (tank, 1% failure, $0, never
+  removed).
+- The updated Living Waters layer (`DATA_PATH/Toads/TCZ/living-waters/living_waters_points.geojson`)
+  has 35 points (the 33 old ones plus 2 new), 20 inside the TCZ. It carries the survey's
+  `group_assessment` and ground-truthing status.
+
+Changes:
+- New `src/tcz-sims/build-tcz-units.R` (`build_tcz_units()`) builds intervention units:
+  - records in a fenced enclosure (table `fence.enclosures`) become one fenced unit, placed at
+    the centroid of its water points;
+  - other records within 100 m are merged;
+  - each unit gets the summed cost, a control type, and `candidate = cost > 0`;
+  - it checks that every record is in exactly one unit, costs add up, and no units are within 100 m.
+- `load-data.R` reads the new workbook and Living Waters layer, and builds two point sets:
+  `all.points` (every record; `forecast.R`) and `tcz.points` (units; `tcz-sims.R`). It writes
+  `out/tcz-units.csv`.
+- `tcz-sims.R` runs on `tcz.points`. It checks that every unit survives `setup()` and that nothing
+  outside the TCZ has a control, and builds `tcz.units.sim` (unit ID, cost, candidate), aligned
+  row-for-row with `spread.table`, for step 3.
+- "Shelemar Perimeter Fence West - 3" is part of the same fence (confirmed by the project lead).
+
+Decisions (project lead, 2026-11-26):
+- **CE uses the direct cost** (`Cost/Site`, $16.56M in total), not the whole-project total.
+- **Survey consent is recorded outside this layer.** The blank `model_use` field doesn't block
+  modelling `group_assessment`.
+- **The methods text changes to match the survey's categories** (Always Wet / Sometimes Dry /
+  Don't Know), rather than the calibration being made to fit never / some years / most years /
+  every year. Do this in step 5, with the calibration.
+
+Results:
+- **261 units** from 277 records (9 merged within 100 m, 7 folded into the Shelemar fence):
+  8 fences and 253 tanks. **197 candidates**, $16,521,766 in total (the direct cost less the two
+  orphan rows). 64 units are fixed.
+- **Baseline: full implementation** (100 runs × 50 years, natural points never dry):
+
+  | | Step 1 | Step 2 |
+  |---|---|---|
+  | Points in run (inside TCZ: tank / fence / natural) | 727 (259 / 8 / 19) | 723 (253 / 8 / 20) |
+  | Breaches | 0 / 100 | **0 / 100** |
+  | Point-years inside the TCZ, mean | 441 | 504 |
+  | of which natural / tank / fence | 410 / 25 / 6 | 472 / 26 / 6 |
+  | TCZ points ever colonised, mean | 38 | 40 |
+
+  The rise in point-years is almost all on natural points: one more natural point inside the
+  TCZ, and natural points still never dry.

@@ -3,6 +3,7 @@
 ######## load functions and libraries ########
 source("src/pprocess_functions.R") # functions for point process model
 source("src/tcz-sims/get-invasion-front.R") # function for bringing in current invasion front
+source("src/tcz-sims/build-tcz-units.R") # audit records -> intervention units for tcz-sims.R
 
 ######## load posteriors ########
 load("dat/Posteriors_2026.RData")
@@ -18,17 +19,16 @@ tcz.sites <- st_read(file.path(data.dir, data.dump.id, "water_point_audit.geojso
   mutate(origin_des = "Manmade", inside_tcz = TRUE) |> 
   select(-observer, -station_name, -traditional_owner_country, -whole_site_photo)
 
-# load costing data
-## Total costs
-total.cost <- readxl::read_xlsx(path = file.path(data.dir, "optimisation-data/TCZ Price per site - Post PCR001.xlsx"),
-                                sheet = "Analysis") |> 
-  select('Total Cost') |> 
-  slice(1) |> 
-  unlist()
-## Site-level costs
-tcz.costs <- readxl::read_xlsx(path = file.path(data.dir, "optimisation-data/TCZ Price per site - Post PCR001.xlsx"),
-                               sheet = "Analysis") |> 
-  filter(!is.na(ParentID)) |> 
+# load costing data (9 Jul 2026 activity-steps workbook, 4 crews)
+cost.file <- file.path(data.dir, "optimisation-data/Activity Steps Toad project - 4 crew - 9Jul26.xlsx")
+cost.sheet <- readxl::read_xlsx(path = cost.file, sheet = "Analysis", .name_repair = "unique_quiet")
+## Project totals, for reporting. Cost/Site spreads only the direct infrastructure cost across
+## sites, so site costs sum to the direct construction cost, not the total project cost.
+cost.totals <- c(total.project = as.numeric(cost.sheet$`Total Project Cost`[1]),
+                 direct.construction = as.numeric(cost.sheet$`Direct Construction Cost`[1]))
+## Site-level costs (one row per audit record, keyed on ParentID = X_record_id)
+tcz.costs <- cost.sheet |>
+  filter(!is.na(ParentID)) |>
   select(1:6)
 names(tcz.costs) <- tolower(make.names(names(tcz.costs)))
 
@@ -49,8 +49,10 @@ old.lagrange.points <- st_read(file.path(spatial.dir, "Edited-layers/merged-poin
 ## Note the manmade points in the TCZ here ^ have been replaced by the audit in tcz.sites
 # these old.lagrange.points also do a bad job of identifying natural waterpoints in TCZ.  Need to replace with something else
 # Living waters points make the most sense
-living.waters <- st_read(file.path(spatial.dir, "living-waters/living-waters-points.shp")) |>
-  mutate(origin_des = "Natural") |> 
+# (Fulcrum export, Nov 2026: ground-truthing status and the drying survey's group_assessment)
+living.waters <- st_read(file.path(Sys.getenv("DATA_PATH"), "Toads/TCZ/living-waters/living_waters_points.geojson")) |>
+  select(lw_record_id = X_record_id, lw_status = X_status, group_assessment) |> # drop free-text and people fields
+  mutate(origin_des = "Natural") |>
   st_transform(4326) # switch to WGS84 to match other data sources
 
 
@@ -102,27 +104,32 @@ old.lagrange.points <- old.lagrange.points |>
 lagrange.filtered <- old.lagrange.points |>
   filter(!inside_tcz) # remove all these points, natural and manmade
 
-# 3. Merge tcz.sites with filtered lagrange points
-# (unmatched columns will fill with NA)
-all.points <- bind_rows(lagrange.filtered, tcz.sites, living.waters) 
-all.points$inside_tcz <- st_within(all.points, tcz.boundary, sparse = FALSE)[, 1]
+# 3. Intervention units for tcz-sims.R: audit records merged within 100 m and into fenced
+#    enclosures, with summed costs (see build-tcz-units.R)
+tcz.units <- build_tcz_units(tcz.sites, tcz.costs, fence.lengths) |>
+  mutate(origin_des = "Manmade", inside_tcz = TRUE)
+write.csv(st_drop_geometry(tcz.units), "out/tcz-units.csv", row.names = FALSE)
+tcz.units <- tcz.units |> select(-X, -Y) |> st_transform(4326) # X/Y are re-added below
 
-# 4. Extract rainfall values to the merged point set
-rainfall.vals <- terra::extract(rainfall.raster, terra::vect(all.points))
-all.points <- all.points |>
-  mutate(rainfall = rainfall.vals[[2]])
+# 4. Rainfall, colonisation status and Albers coordinates for a merged point set
+finish_points <- function(pts) {
+  pts$inside_tcz <- st_within(pts, tcz.boundary, sparse = FALSE)[, 1]
+  rainfall.vals <- terra::extract(rainfall.raster, terra::vect(pts))
+  pts <- pts |> mutate(rainfall = rainfall.vals[[2]])
+  colnsd <- score_colonised_multi_year(pts)
+  pts <- colnsd$scored.points # includes colonised (0/1) and colonisation_year
+  albers <- pts |> st_transform(crs = 3577) |> st_coordinates()
+  list(points = bind_cols(pts, albers), fronts = colnsd$fronts, fp = colnsd$fp)
+}
 
-####### Bring in estimated invasion front(s) and scored colonised points #######
-colnsd <- score_colonised_multi_year(all.points)
-all.points <- colnsd$scored.points # includes colonised (0/1) and colonisation_year
-inv.front <- colnsd$fronts # one front line per modelled year
-fp <- colnsd$fp; rm(colnsd)
-
-# get coordinates in albers
-albers <- all.points |> 
-  st_transform(crs = 3577) |> 
-  st_coordinates()
-all.points <- bind_cols(all.points, albers)
+# all.points: every audit record as its own point (forecast.R, the do-nothing scenario)
+fin <- finish_points(bind_rows(lagrange.filtered, tcz.sites, living.waters))
+all.points <- fin$points
+inv.front <- fin$fronts # one front line per modelled year
+fp <- fin$fp
+# tcz.points: TCZ audit records replaced by intervention units (tcz-sims.R)
+tcz.points <- finish_points(bind_rows(lagrange.filtered, tcz.units, living.waters))$points
+rm(fin)
 
 ####### Plot it #######
 bbox <- st_bbox(all.points)
