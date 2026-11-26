@@ -18,11 +18,27 @@
   // ---- Tabs ----
   var tabs = document.querySelectorAll('[data-tab]');
   var map; // set below; resized when the Forecast tab is shown again
+  // If the map is first fitted while the Forecast tab is hidden (page opened on
+  // #about), its container has zero size and the zoom comes out wrong; remember
+  // the bounds and fit again once the tab is visible.
+  var pendingBounds = null;
+  function fitMap(bounds) {
+    if (map.getContainer().clientWidth === 0) { pendingBounds = bounds; return; }
+    pendingBounds = null;
+    // Leaflet caches the container size and invalidateSize() is a no-op until
+    // the map has a view, so give it a provisional view, refresh the size, fit.
+    if (!map._loaded) map.setView(L.latLngBounds(bounds).getCenter(), 5, { animate: false });
+    map.invalidateSize({ pan: false });
+    map.fitBounds(bounds, { animate: false });
+  }
   function showTab(name) {
     tabs.forEach(function (a) { a.classList.toggle('active', a.dataset.tab === name); });
     document.getElementById('tab-forecast').hidden = name !== 'forecast';
     document.getElementById('tab-about').hidden = name !== 'about';
-    if (name === 'forecast' && map) map.invalidateSize();
+    if (name === 'forecast' && map) {
+      if (pendingBounds) fitMap(pendingBounds);
+      else map.invalidateSize();
+    }
   }
   tabs.forEach(function (a) {
     a.addEventListener('click', function (e) {
@@ -35,7 +51,7 @@
 
   // ---- Map shell (tiles render while the data loads) ----
   map = L.map('map', { preferCanvas: true, zoomSnap: 0.25 });
-  map.fitBounds([[-20.27, 120.56], [-15.44, 124.86]]); // replaced by the data's bounds
+  fitMap([[-20.27, 120.56], [-15.44, 124.86]]); // replaced by the data's bounds
 
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
     opacity: 0.75,
@@ -128,7 +144,7 @@
 
     document.querySelectorAll('.n-sims').forEach(function (el) { el.textContent = fc.n_sims; });
     document.querySelectorAll('.updated').forEach(function (el) { el.textContent = fc.updated_label; });
-    map.fitBounds(fc.bounds);
+    fitMap(fc.bounds);
 
     // One circle marker per waterpoint, restyled per year rather than rebuilt.
     var markers = new Array(n);
