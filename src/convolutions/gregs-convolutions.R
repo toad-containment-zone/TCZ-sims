@@ -4,7 +4,8 @@ source("src/convolutions/convolution-functions.R")
 library(amt)
 library(dplyr)
 
-ndays<-250 #days over which to convolve
+ndays <- 365 # days over which to convolve: covers any rain_to_days() output (at most season.days, 212 by default)
+set.seed(20261127) # reproducible resampling
 
 #load data and convert date to POSIXct
 d<-read.table("dat/gregsData.txt", header=T, sep="\t")

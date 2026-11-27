@@ -8,7 +8,7 @@ all.points <- all.points |>
   mutate(colonised = ifelse(st_within(geometry, tcz.boundary, sparse = FALSE)[, 1], 2L, colonised))
 
 ######## load simulation posteriors ########
-load("dat/Posteriors_2026.RData")
+load_posteriors() # the shared calibration, POSTERIORS_FILE in pprocess_functions.R
 
 start_year <- 2026
 
@@ -25,7 +25,8 @@ setup(point.data = all.points,
       trunc.dist = TRUE,
       TCZ = FALSE,
       col.year.id = "colonisation_year",
-      start.year = start_year)
+      start.year = start_year,
+      season.days = 365) # the raster counts rainy days all year; keeps the old mapping until Phase 2 moves this to SILO
 # write out points for basemapping
 write.csv(spread.table, file = "out/basemap_points.csv", row.names = FALSE)
 # run sims..

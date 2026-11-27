@@ -78,7 +78,7 @@ tcz.points$rain.extreme <- rain.years$point.rain.days.max
 stopifnot(!anyNA(tcz.points$rain.mean), !anyNA(tcz.points$rain.extreme))
 
 ######## load simulation posteriors ########
-load("dat/Posteriors_2026.RData")
+load_posteriors() # the shared calibration, POSTERIORS_FILE in pprocess_functions.R
 
 
 ######## full-implementation point set ########

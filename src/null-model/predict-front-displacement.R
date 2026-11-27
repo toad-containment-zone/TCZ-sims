@@ -9,6 +9,10 @@
 # bbox.fit, mean.coord, scale, years.all) to already exist in $DATA_PATH --
 # produced by (re-)running that script in invasion-front-monitoring.
 #
+# STATUS (2026-11-27): frozen at the old model structure (raster / all-year SILO rainy days,
+# season.days = 365) until Phase 2 of docs/roadmap.md moves it onto the shared SILO two-kernel
+# structure with forecast.R. It does run at c >= 2 and on the shared calibration.
+#
 # Notes:
 # - The starting front for year k is fixed at its posterior mean (a, b_k) -- not
 #   resampled per rep -- so the resulting spread of b_sim across reps reflects only
@@ -122,7 +126,7 @@ all.points <- bind_cols(all.points, albers)
 
 
 ######## load simulation posteriors ########
-load("dat/Posteriors_2026.RData")
+load_posteriors() # the shared calibration, POSTERIORS_FILE in pprocess_functions.R
 
 ## Make a static figure here to show selected points, and the invasion front lines on a map.
 dir.create("out/null-model", showWarnings = FALSE)
@@ -195,7 +199,8 @@ setup(point.data = all.points,
       threshold = 100,
       constant.rain = NULL,
       trunc.dist = TRUE,
-      TCZ = FALSE)
+      TCZ = FALSE,
+      season.days = 365) # the raster counts rainy days all year: frozen at the old mapping until Phase 2
 
 # original all.points row index for each surviving (post-dedup) spread.table row, so a given
 # year's present_k (indexed by all.points row) can be aligned to spread.table's row order
@@ -448,7 +453,8 @@ for (tt in seq_along(sim.years)) {
         threshold = 100,
         constant.rain = NULL,
         trunc.dist = TRUE,
-        TCZ = FALSE)
+        TCZ = FALSE,
+        season.days = 365) # all-year rainy-day counts: frozen at the old mapping until Phase 2
 
   # this year's own kept.ids -- not reused from the static-rainfall loop above, since
   # this is a fresh setup() call (dedup only depends on X/Y/threshold so in practice

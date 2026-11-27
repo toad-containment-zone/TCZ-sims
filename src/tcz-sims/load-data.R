@@ -6,7 +6,7 @@ source("src/tcz-sims/get-invasion-front.R") # function for bringing in current i
 source("src/tcz-sims/build-tcz-units.R") # audit records -> intervention units for tcz-sims.R
 
 ######## load posteriors ########
-load("dat/Posteriors_2026.RData")
+load_posteriors() # the shared calibration, POSTERIORS_FILE in pprocess_functions.R
 
 ######## define the data directories ########
 data.dir <- file.path(Sys.getenv("DATA_PATH"), "Toads/TCZ/infrastructure")

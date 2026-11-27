@@ -4,12 +4,14 @@
 #   - the 25-year reference sequence of simulated years, and which of them are "extreme" wet years
 #     (top 20% by Dec-May rainfall averaged over the region's cells); the extreme years switch the
 #     dispersal kernel to the extreme kernel (ms/tcz-optimisation-methods.qmd, "Modelled scenario")
-#   - per point, the maximum rainy days (>= 1 mm) in any reference year, which sets that extreme kernel
+#   - per point, the mean and maximum rainy days (>= 1 mm, Nov-May only: the movable season in
+#     rain_to_days()) over the reference years, which set the standard and extreme kernels
 #   - per cell and year, wet-season rainfall, kept for the step 5 drying matrix (which needs the two
 #     years before the reference for its lag terms)
 #
 # Season year Y runs Jul (Y-1) to Jun (Y); its wet season is Dec (Y-1) to May (Y).
-# Daily rain is cached in dat/silo-tcz-rain-cache.RData (gitignored); needs SILO_API_KEY for cells
+# Daily rain is cached in dat/silo-tcz-rain-cache.RData (gitignored; rain_years(cache=) picks
+# another file for another point set); needs SILO_API_KEY for cells
 # not yet cached. Cell keying matches src/null-model/predict-front-displacement.R.
 
 library(sf)
@@ -45,39 +47,45 @@ fetch_silo_cell <- function(cell, lon, lat, start, end) {
   )
 }
 
-# daily SILO rain for every cell under `points`, fetching only cells not already in the cache
-silo_daily_for <- function(points) {
+# daily SILO rain for every cell under `points`, fetching only cells not already in the cache.
+# `cache` lets another point set (e.g. the Kimberley ABC, src/ABC/kimberley-setup.R) keep its own
+# file; the cache is saved every `save.every` fetched cells so a long fetch can be resumed
+silo_daily_for <- function(points, cache = silo.tcz.cache, save.every = 100) {
   fetch.start <- as.Date(sprintf("%d-07-01", min(rain.lag.years) - 1))
   fetch.end   <- as.Date(sprintf("%d-06-30", max(rain.ref.years)))
   cells <- distinct(silo_cells(points))
   daily <- data.frame()
-  if (file.exists(silo.tcz.cache)) {
-    load(silo.tcz.cache) # silo.tcz.daily, silo.tcz.range
+  if (file.exists(cache)) {
+    load(cache) # silo.tcz.daily, silo.tcz.range
     if (silo.tcz.range["start"] <= fetch.start && silo.tcz.range["end"] >= fetch.end) daily <- silo.tcz.daily
   }
   to.fetch <- cells |> filter(!silo_cell %in% unique(daily$silo_cell))
   cat(nrow(to.fetch), "of", nrow(cells), "SILO cells need fetching\n")
   if (nrow(to.fetch) > 0) {
-    new <- Map(fetch_silo_cell, to.fetch$silo_cell, to.fetch$silo_lon, to.fetch$silo_lat,
-               MoreArgs = list(start = fetch.start, end = fetch.end)) |> bind_rows()
-    daily <- bind_rows(daily, new)
-    silo.tcz.daily <- daily
-    silo.tcz.range <- c(start = fetch.start, end = fetch.end)
-    save(silo.tcz.daily, silo.tcz.range, file = silo.tcz.cache)
+    chunks <- split(seq_len(nrow(to.fetch)), ceiling(seq_len(nrow(to.fetch)) / save.every))
+    for (ch in chunks) {
+      new <- Map(fetch_silo_cell, to.fetch$silo_cell[ch], to.fetch$silo_lon[ch], to.fetch$silo_lat[ch],
+                 MoreArgs = list(start = fetch.start, end = fetch.end)) |> bind_rows()
+      daily <- bind_rows(daily, new)
+      silo.tcz.daily <- daily
+      silo.tcz.range <- c(start = fetch.start, end = fetch.end)
+      save(silo.tcz.daily, silo.tcz.range, file = cache)
+      cat("  saved", length(unique(daily$silo_cell)), "cells to", cache, "\n")
+    }
   }
   missing <- setdiff(cells$silo_cell, daily$silo_cell)
   if (length(missing) > 0) stop("no SILO data for ", length(missing), " cell(s), e.g. ", missing[1])
   daily |> filter(silo_cell %in% cells$silo_cell)
 }
 
-rain_years <- function(points) {
-  daily <- silo_daily_for(points) |>
+rain_years <- function(points, cache = silo.tcz.cache) {
+  daily <- silo_daily_for(points, cache) |>
     mutate(season.year = ifelse(month >= 7, year + 1, year))
 
   cell.year <- daily |>
     filter(season.year %in% c(rain.lag.years, rain.ref.years)) |>
     group_by(silo_cell, season.year) |>
-    summarise(rain.days = sum(rainfall >= 1),
+    summarise(rain.days = sum(rainfall >= 1 & month %in% c(11, 12, 1:5)), # Nov-May: the movable season in rain_to_days()
               wet.mm = sum(rainfall[month %in% c(12, 1:5)]),
               n.days = n(), .groups = "drop")
   stopifnot(all(cell.year$n.days >= 365))

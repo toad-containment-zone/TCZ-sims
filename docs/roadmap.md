@@ -36,6 +36,11 @@ archive has the reasons.
 - A removed fence keeps its effective radius `r.eff` and loses only its breach thinning and
   control test (2026-11-26).
 - `days.per.rain = 4`: movement on the rainy day plus the 3 days after it (2026-11-26).
+- Movement days come from `rain_to_days()` with `season.days = 212`. That is the Nov–May movable
+  season, since toads don't move from June to October. Only Nov–May rainy days count. The
+  mapping is a rough, saturating guess: about 4 days per rainy day early in the season, levelling
+  off at the season length. It isn't worth refining without data on movement against water
+  balance (2026-11-27).
 - All TCZ rainfall comes from SILO. The reference years are 2002–2026, extreme years are the top
   20% by wet-season rainfall, and each run starts at a random reference year (2026-11-26).
 - Drying: the TO assessment decides whether a point dries, and DEA only how drying responds to
@@ -45,6 +50,38 @@ archive has the reasons.
   evaluations (2026-11-27).
 - Eradication costs $37,469 per erad-unit per response (2026-11-27).
 - The Kimberley refit uses the same model structure as the TCZ runs (2026-11-27).
+- **One calibration and model structure for every live application (2026-11-27).**
+  - All live applications use the same λ posterior, kernel table, movement mapping, colonisation
+    threshold and rain source.
+  - The calibration is set in one place, `POSTERIORS_FILE` in `pprocess_functions.R`, and loaded
+    with `load_posteriors()`.
+  - When the calibration or the structure changes, update every live application in the same
+    piece of work, and flag each change as it's made.
+  - The live applications are listed under "Applications" below. Everything else is in
+    `src/archive/` and is not maintained.
+- The Kimberley fit has no natural-point drying. There's no TO assessment there, so under the
+  current rule its natural points never dry. That keeps the control step off and rollup on
+  (2026-11-27).
+- The Kimberley SILO fetch covers 4,325 cells for 1999–2026. The fetch and the ABC both run
+  locally (2026-11-27).
+- r = 100 m (`run_sims()`), as the calibration and all runs have used; the methods said 300 m in
+  error (2026-11-27).
+
+## Applications
+
+The applications that must stay on the shared calibration and model structure. "Aligned" means
+everything except λ, which changes for all of them when Phase 1 sets `POSTERIORS_FILE`.
+
+| Application | Rain / kernels | Status |
+|---|---|---|
+| `src/ABC/` (the calibration itself) | SILO mean + extreme, real 2010–23 sequence | Phase 1 |
+| `tcz-setup.R` → `tcz-sims.R`, `tcz-optimise.R` | SILO mean + extreme, random start, drying | Aligned; final runs in Phase 4 |
+| `forecast.R` → public site | raster, one kernel, `season.days = 365` | Phase 2 |
+| `null-model/predict-front-displacement.R` | raster / all-year SILO per year, `season.days = 365` | Phase 2 |
+| `control-step-demo.R` (synthetic checks) | constant movement days | Aligned |
+
+Archived on 2026-11-27 (`src/archive/README.md`): `tingley-sims/`, `pilbara-impact-sims/` (Dunlop
+*et al.*, submitted 2025), `paruku-impact-sims/` and the original VRD ABC scripts.
 
 ## Phases
 
@@ -79,6 +116,10 @@ The phases are in dependency order: each uses only the outputs of earlier phases
    - Add inter-annual variation as the optimisation runs have it: a random reference-year start
      per run, the extreme kernel and the drying matrix (via `run_sims(extreme.ref=, drying.spec=)`).
    - Factor the setup shared with `tcz-setup.R` into one path for both pipelines.
+   - Move the null model (`src/null-model/predict-front-displacement.R`) onto the same path. Its
+     static scenario takes SILO mean and extreme kernels, with real extreme years. Its per-year
+     scenario counts Nov–May rainy days with `season.days = 212`. Then rerun it as an
+     out-of-sample check of the Phase 1 calibration against the observed front movement.
    - Compare the new arrival-time forecast with the current one.
    - Regenerate the public site in Phase 5, not here, so it changes once, with the final text.
 3. **Input-data review for the optimisation.** A checklist to work through with the project
@@ -110,8 +151,7 @@ The phases are in dependency order: each uses only the outputs of earlier phases
    - **Setup:**
      - the invasion-front parameters (are they the latest fit?);
      - the 80 km buffer and the target points;
-     - SILO cache freshness and the reference years;
-     - the 147 points capped at the 250-day kernel table in extreme years.
+     - SILO cache freshness and the reference years.
 4. **Remaining optimisation updates and final runs** (`src/tcz-sims/`).
    - **Maintenance costs:** a 50-year maintenance cost for each fence and tank, added to its
      capital cost.
@@ -151,12 +191,8 @@ The phases are in dependency order: each uses only the outputs of earlier phases
 
 ## Open questions
 
-- **Drying in the Kimberley fit:** should natural-point drying apply? There's no TO assessment
-  there, and under the current rule natural points without one never dry.
 - **Sensitivity set:** which parameters to vary, and over what ranges (Phase 4).
 - **Summary report:** its audience and format (Phase 5).
-- **Kimberley SILO coverage:** how many cells and years the fit needs, and whether the fetch and
-  ABC runs need the cluster (Phase 1).
 
 ## Detailed phase plans
 

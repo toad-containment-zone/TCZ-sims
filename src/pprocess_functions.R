@@ -13,6 +13,19 @@ CONTROL_NONE  <- 0L
 CONTROL_TANK  <- 1L
 CONTROL_FENCE <- 2L
 
+# The one calibration every live application uses: lambda's posterior (sample.lambda,
+# sample.lambda.sd, log10 scale) from the Kimberley ABC (src/ABC/). When the calibration is
+# refitted, change this line only (docs/roadmap.md, "One calibration and model structure").
+POSTERIORS_FILE <- "dat/Posteriors_2026.RData"
+load_posteriors <- function(file = POSTERIORS_FILE) {
+  load(file, envir = globalenv())
+  cat("Calibration:", file, sprintf("(log10 lambda %.3f, sd %.4f)\n", sample.lambda, sample.lambda.sd))
+}
+
+# a point is colonised when at least this many colonists arrive (c >= 2: two arrivals can found a
+# population; roadmap Phase 1, 2026-11-27 -- it was c >= 3 before)
+COLONISE_MIN <- 2
+
 # maps a character control-type column ("none"/"tank"/"fence", case-insensitive) onto the
 # numeric codes above; unmatched or NA values fall back to CONTROL_NONE
 encode_control_type <- function(x){
@@ -239,14 +252,21 @@ plotter<-function(popmatrix, file.name="temp.png", gen){
   dev.off()
 }
 
-# function mapping days of rain to days of movement
-rain_to_days <- function(rain.days, days.per.rain = 4){
+# function mapping days of rain to days of movement: a rough, saturating guess. Each rainy day opens
+# a window of days.per.rain movement days (about right early in the wet season); the windows are
+# combined as a union of probabilities over the season, so movement days rise at about
+# days.per.rain per rainy day when it's dry and level off at season.days. season.days is the
+# movable season, Nov-May (212 days): toads don't move in the Jun-Oct dry season (2026-11-27;
+# it was 365 before)
+rain_to_days <- function(rain.days, days.per.rain = 4, season.days = 212){
   days <- function(r.d){
-    denom <- 365:(365-(r.d-1))
-    p.no.move <- 1-days.per.rain/denom
+    if (is.na(r.d)) return(NA_real_)
+    if (r.d < 1) return(0)
+    denom <- season.days:(season.days-(min(r.d, season.days)-1))
+    p.no.move <- pmax(0, 1-days.per.rain/denom) # 0 once the windows must cover the whole season
     p.no.move <- prod(p.no.move)
     p.move <- 1 - p.no.move
-    days <- p.move * 365
+    days <- p.move * season.days
     round(days)
   }
   sapply(rain.days, days)
@@ -286,16 +306,21 @@ run_sims <- function(n.sims = 100, gens, plot = FALSE, rollup,
                       control.step = FALSE, stop.on.target = TRUE, drying.matrix = NULL,
                       pairs.extreme = NULL, # extreme-wet-year dispersal matrix (setup(rain.extreme.id=))
                       extreme.ref = NULL, # logical, one per reference year: is it an extreme wet year?
-                      drying.spec = NULL) { # natural-point drying (drying-model.R drying_spec()); overrides drying.matrix
-  # each rep starts at a random year of the reference and wraps round it (rain-years.R)
+                      drying.spec = NULL, # natural-point drying (drying-model.R drying_spec()); overrides drying.matrix
+                      extreme.years = NULL) { # logical, one per generation: a fixed year sequence (e.g. the real
+                      # 2010-2023 history in the Kimberley ABC), used as is in every rep with no random start
+  # with extreme.ref, each rep starts at a random year of the reference and wraps round it (rain-years.R)
   if (control.step && rollup) stop("rollup and control.step cannot both be TRUE -- control-step scenarios must process every site every generation")
+  if (!is.null(extreme.years) && (!is.null(extreme.ref) || !is.null(drying.spec)))
+    stop("extreme.years is a fixed sequence; it can't be combined with extreme.ref or drying.spec, which draw a random start")
+  fixed.extreme <- extreme.years
   output<-vector("list", length=n.sims) # vector to take outputs
 
   for (rr in 1:n.sims){ # for reps
     cat("Rep ", rr, " of ", n.sims, "\n")
     lambda.samp<-10^rnorm(1, mean=sample.lambda, sd=sample.lambda.sd)
     r.samp<-10^2
-    start <- NA; extreme.years <- NULL; drying.rep <- drying.matrix
+    start <- NA; extreme.years <- fixed.extreme; drying.rep <- drying.matrix
     n.ref <- if (!is.null(extreme.ref)) length(extreme.ref) else if (!is.null(drying.spec)) nrow(drying.spec$x1) else NA
     if (!is.na(n.ref)) {
       start <- sample.int(n.ref, 1)
@@ -396,7 +421,8 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
                   control.fail.prob.id = NULL, # name of a column overriding the default annual control-defeat probability
                   col.year.id = NULL, # name of a column giving each point's known historical colonisation year (NA if unknown/not colonised)
                   start.year = NULL, # forecast start year; required when col.year.id is supplied, to convert a colonisation year into a generation offset
-                  rain.extreme.id = NULL # name of a column giving each point's rainy days in an extreme wet year -- builds pairs.extreme, the extreme-year dispersal matrix
+                  rain.extreme.id = NULL, # name of a column giving each point's rainy days in an extreme wet year -- builds pairs.extreme, the extreme-year dispersal matrix
+                  season.days = 212 # movable season for rain_to_days() (Nov-May); forecast.R passes 365 until Phase 2 moves it to SILO
 ){
   cat("Loading kernel parameters...\n")
   load("dat/Kernel-fits_truncated.RData")
@@ -410,30 +436,24 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
   
   if (TCZ) pData <- subset(pData, !(pData[["TCZ"]] == 1 & pData[[artificial.natural.id]] == 0))
   
-  cat("Loading posterior estimates...\n")
-  load("dat/Posteriors.RData")
   
   
   cat("Assigning kernel parameters to waterpoints...\n")
   # assign kernel values to waterpoints
   if (is.null(constant.rain)){
-    u <- rain_to_days(pData[[rain.id]])
+    u <- rain_to_days(pData[[rain.id]], season.days = season.days)
   }else {u <- rep(constant.rain, nrow(pData))}
-  #browser()
+  # the kernel table is fitted for 1-365 days of movement, and rain_to_days() never exceeds season.days
+  stopifnot(all(u >= 1 & u <= nrow(fits), na.rm = TRUE))
   u<-fits[u, c("u", "v", "max.dist", "area")]
   if (!trunc.dist) u[, "max.dist"] <- NULL # to switch to infinite positive bounds on kernel
 
   # extreme-wet-year kernel: the same lookup from each point's extreme-year rainy days
-  # (ms/tcz-optimisation-methods.qmd, "Modelled scenario"); movement days beyond the fitted
-  # kernel table are capped at its last row
+  # (ms/tcz-optimisation-methods.qmd, "Modelled scenario")
   u.x <- NULL
   if (!is.null(rain.extreme.id)) {
-    days.x <- rain_to_days(pData[[rain.extreme.id]])
-    if (any(days.x > nrow(fits))) {
-      warning(sum(days.x > nrow(fits)), " point(s) have extreme-year movement days beyond the kernel table (",
-              nrow(fits), "); capped")
-      days.x <- pmin(days.x, nrow(fits))
-    }
+    days.x <- rain_to_days(pData[[rain.extreme.id]], season.days = season.days)
+    stopifnot(all(days.x >= 1 & days.x <= nrow(fits), na.rm = TRUE))
     u.x <- fits[days.x, c("u", "v", "max.dist", "area")]
     colnames(u.x) <- paste0(colnames(u.x), ".x")
   }
@@ -608,13 +628,13 @@ spread.pilb<-function(pop, gens, pairs, delta, r, plot=FALSE, rollup,
         fence.uncol <- is.fence & !pres.before
         if (any(fence.uncol)) realised_n[fence.uncol] <- rbinom(sum(fence.uncol), size=realised_n[fence.uncol], prob=pop[fence.uncol,"p.breach"])
       }
-      colonised <- realised_n > 2
+      colonised <- realised_n >= COLONISE_MIN
     }else {
       if (control.step){
         fence.uncol <- is.fence & !pres.before
         if (any(fence.uncol)) expected_n[fence.uncol] <- expected_n[fence.uncol]*pop[fence.uncol,"p.breach"] # expected-value analogue of the Binom thinning above
       }
-      colonised <- expected_n > 2
+      colonised <- expected_n >= COLONISE_MIN
     }
     pop[colonised, "Pres"] <- 1 #set to colonised
 

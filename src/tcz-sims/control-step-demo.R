@@ -142,12 +142,12 @@ for (rr in seq_len(n.reps)) {
 cat(sprintf("Unfenced target colonisation rate: %.3f\n", mean(unfenced.col)))
 cat(sprintf("Fenced target colonisation rate:   %.3f\n", mean(fenced.col)))
 # Expected rates, from the same multinomial-then-threshold logic: each target's arrivals are
-# ~Poisson(m) for some m, unfenced colonised when > 2 arrive, fenced when > 2 of Binom(n, p.breach)
-# get through, i.e. ~Poisson(m * p.breach). Back out m from the observed unfenced rate.
-pois.gt2 <- function(m) 1 - ppois(2, m)
-m.hat <- uniroot(function(m) pois.gt2(m) - mean(unfenced.col), c(1e-6, 1e4))$root
-exp.right <- pois.gt2(m.hat * p.breach.val)       # thinning by p.breach (intended)
-exp.wrong <- pois.gt2(m.hat * (1 - p.breach.val)) # thinning by 1 - p.breach (the old bug)
+# ~Poisson(m) for some m, unfenced colonised when >= COLONISE_MIN arrive, fenced when >= COLONISE_MIN
+# of Binom(n, p.breach) get through, i.e. ~Poisson(m * p.breach). Back out m from the observed unfenced rate.
+pois.col <- function(m) 1 - ppois(COLONISE_MIN - 1, m)
+m.hat <- uniroot(function(m) pois.col(m) - mean(unfenced.col), c(1e-6, 1e4))$root
+exp.right <- pois.col(m.hat * p.breach.val)       # thinning by p.breach (intended)
+exp.wrong <- pois.col(m.hat * (1 - p.breach.val)) # thinning by 1 - p.breach (the old bug)
 cat(sprintf("Expected fenced rate if thinned by p.breach:     %.3f\n", exp.right))
 cat(sprintf("Expected fenced rate if thinned by 1 - p.breach: %.3f\n", exp.wrong))
 stopifnot(abs(mean(fenced.col) - exp.right) < abs(mean(fenced.col) - exp.wrong),
@@ -169,7 +169,7 @@ kernel.data <- rbind(data.frame(X = 0, Y = 0, present = 1),
                      data.frame(X = far.dist*cos(far.angles), Y = far.dist*sin(far.angles), present = 0))
 kernel.data$art_nat <- 1
 kernel.data$control_type <- "none"
-kernel.data$rain_extreme <- 80 # rainy days in an extreme year -> rain_to_days(80) ~ 230 movement days
+kernel.data$rain_extreme <- 80 # rainy days in an extreme year -> rain_to_days(80) ~ 181 movement days
 setup(point.data = kernel.data,
       X.id = "X", Y.id = "Y", present.id = "present", artificial.natural.id = "art_nat",
       remove_duplicates = FALSE, constant.rain = 100, TCZ = FALSE, # standard: 100 movement days
