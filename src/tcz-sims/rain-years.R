@@ -32,19 +32,26 @@ silo_cells <- function(points) {
   data.frame(silo_cell = sprintf("%.2f_%.2f", lon, lat), silo_lon = lon, silo_lat = lat)
 }
 
-fetch_silo_cell <- function(cell, lon, lat, start, end) {
+fetch_silo_cell <- function(cell, lon, lat, start, end, tries = 3) {
   cat("  Fetching", cell, "\n")
-  tryCatch(
-    get_data_drill(longitude = lon, latitude = lat, start_date = start, end_date = end,
-                   values = "rain", api_key = Sys.getenv("SILO_API_KEY")) |>
-      as.data.frame() |>
-      select(year, month, day, rainfall) |>
-      mutate(silo_cell = cell),
-    error = function(e) {
-      warning("SILO fetch failed for ", cell, ": ", conditionMessage(e))
-      NULL
-    }
-  )
+  # SILO occasionally fails or returns no rows under load (239 of 4,325 Kimberley cells on
+  # 2026-11-27, all of which returned data on a retry), so retry with a pause before giving up
+  for (attempt in seq_len(tries)) {
+    out <- tryCatch(
+      get_data_drill(longitude = lon, latitude = lat, start_date = start, end_date = end,
+                     values = "rain", api_key = Sys.getenv("SILO_API_KEY")) |>
+        as.data.frame() |>
+        select(year, month, day, rainfall) |>
+        mutate(silo_cell = cell),
+      error = function(e) {
+        warning("SILO fetch failed for ", cell, " (attempt ", attempt, "): ", conditionMessage(e))
+        NULL
+      }
+    )
+    if (!is.null(out) && nrow(out) > 0) return(out)
+    if (attempt < tries) Sys.sleep(5 * attempt)
+  }
+  NULL
 }
 
 # daily SILO rain for every cell under `points`, fetching only cells not already in the cache.
@@ -55,11 +62,12 @@ silo_daily_for <- function(points, cache = silo.tcz.cache, save.every = 100) {
   fetch.end   <- as.Date(sprintf("%d-06-30", max(rain.ref.years)))
   cells <- distinct(silo_cells(points))
   daily <- data.frame()
+  silo.tcz.nodata <- character(0) # cells SILO has no data for, even on retry (not refetched)
   if (file.exists(cache)) {
-    load(cache) # silo.tcz.daily, silo.tcz.range
+    load(cache) # silo.tcz.daily, silo.tcz.range, and silo.tcz.nodata if any
     if (silo.tcz.range["start"] <= fetch.start && silo.tcz.range["end"] >= fetch.end) daily <- silo.tcz.daily
   }
-  to.fetch <- cells |> filter(!silo_cell %in% unique(daily$silo_cell))
+  to.fetch <- cells |> filter(!silo_cell %in% unique(daily$silo_cell), !silo_cell %in% silo.tcz.nodata)
   cat(nrow(to.fetch), "of", nrow(cells), "SILO cells need fetching\n")
   if (nrow(to.fetch) > 0) {
     chunks <- split(seq_len(nrow(to.fetch)), ceiling(seq_len(nrow(to.fetch)) / save.every))
@@ -69,12 +77,31 @@ silo_daily_for <- function(points, cache = silo.tcz.cache, save.every = 100) {
       daily <- bind_rows(daily, new)
       silo.tcz.daily <- daily
       silo.tcz.range <- c(start = fetch.start, end = fetch.end)
-      save(silo.tcz.daily, silo.tcz.range, file = cache)
+      save(silo.tcz.daily, silo.tcz.range, silo.tcz.nodata, file = cache)
       cat("  saved", length(unique(daily$silo_cell)), "cells to", cache, "\n")
     }
+    silo.tcz.nodata <- union(silo.tcz.nodata, setdiff(to.fetch$silo_cell, daily$silo_cell))
+    save(silo.tcz.daily, silo.tcz.range, silo.tcz.nodata, file = cache)
   }
+  # a few cells have no SILO data at all, even on retry: small islands and coastal cells outside its
+  # land mask (5 around King Sound and the Buccaneer and Bonaparte archipelagos, 21 Kimberley points,
+  # 2026-11-27).
+  # They take the nearest cell with data, within max.sub.cells cells; the substitution is redone each
+  # run, not cached
   missing <- setdiff(cells$silo_cell, daily$silo_cell)
-  if (length(missing) > 0) stop("no SILO data for ", length(missing), " cell(s), e.g. ", missing[1])
+  if (length(missing) > 0) {
+    have <- distinct(cells |> filter(!silo_cell %in% missing))
+    max.sub.cells <- 6 # 0.3 deg: one offshore-island point (124.20_-15.35) is 0.255 deg from data
+    for (m in missing) {
+      mm <- cells[match(m, cells$silo_cell), ]
+      dd <- sqrt((have$silo_lon - mm$silo_lon)^2 + (have$silo_lat - mm$silo_lat)^2)
+      if (min(dd) > max.sub.cells * silo.cell.res + 1e-9)
+        stop("no SILO data for ", m, " and no cell with data within ", max.sub.cells, " cells")
+      src <- have$silo_cell[which.min(dd)]
+      cat("  no SILO data for", m, "-- using", src, sprintf("(%.2f deg away)\n", min(dd)))
+      daily <- bind_rows(daily, daily |> filter(silo_cell == src) |> mutate(silo_cell = m))
+    }
+  }
   daily |> filter(silo_cell %in% cells$silo_cell)
 }
 

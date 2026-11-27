@@ -24,8 +24,15 @@ optimisation steps 1–6, with every decision, result table and check.
     independent evaluation, and CE is 1,181 against 509.
   - The design is provisional until Phases 1, 3 and 4: the calibration, the inputs and the cost
     model can all still change it.
-- **The annual forecast (`forecast.R`) is unchanged.** It still uses the rainfall raster, the old
-  posteriors and constant rainfall each year.
+- **Phase 1 (the Kimberley refit) is done (2026-11-27).**
+  - New calibration: log₁₀ λ = 4.472 (SD 0.019), in `dat/Posteriors_2026-11-27.RData`.
+    `POSTERIORS_FILE` points to it, so every live application now uses it.
+  - The model structure changed with it: c ≥ 2, `season.days = 212`, kernels for 1–365 days,
+    r = 300 m, and thinning to non-overlapping discs. See the standing decisions.
+  - **Every TCZ, forecast and null-model output on disk is now stale,** including the provisional
+    design above. They were run with the old λ and structure.
+- **The annual forecast (`forecast.R`)** still uses the rainfall raster and one kernel. It is
+  frozen at `season.days = 365` until Phase 2, but now runs on the new calibration.
 
 ## Standing decisions (carried forward)
 
@@ -89,7 +96,7 @@ everything except λ, which changes for all of them when Phase 1 sets `POSTERIOR
 
 | Application | Rain / kernels | Status |
 |---|---|---|
-| `src/ABC/` (the calibration itself) | SILO mean + extreme, real 2010–23 sequence | Phase 1 |
+| `src/ABC/` (the calibration itself) | SILO mean + extreme, real 2010–23 sequence | Done (Phase 1) |
 | `tcz-setup.R` → `tcz-sims.R`, `tcz-optimise.R` | SILO mean + extreme, random start, drying | Aligned; final runs in Phase 4 |
 | `forecast.R` → public site | raster, one kernel, `season.days = 365` | Phase 2 |
 | `null-model/predict-front-displacement.R` | raster / all-year SILO per year, `season.days = 365` | Phase 2 |
@@ -102,7 +109,7 @@ Archived on 2026-11-27 (`src/archive/README.md`): `tingley-sims/`, `pilbara-impa
 
 The phases are in dependency order: each uses only the outputs of earlier phases.
 
-1. **Refit the Kimberley calibration** (`src/ABC/`, `src/cluster/`).
+1. **Refit the Kimberley calibration** (`src/ABC/`). **Done 2026-11-27**; see "Detailed phase plans".
    - **Why:** λ (`dat/Posteriors_2026.RData`) was fitted with the Kimberley points' `ndays_1`
      rainy days. SILO, which the TCZ runs now use, counts about 50% more (42.6 against 28.3 at
      the TCZ points, r = 0.90). So the TCZ runs move toads further each year than the calibration
@@ -212,3 +219,57 @@ The phases are in dependency order: each uses only the outputs of earlier phases
 ## Detailed phase plans
 
 (Filled in as each phase starts.)
+
+### Phase 1: Kimberley refit (done 2026-11-27)
+
+**What was decided along the way** (all now standing decisions above):
+- **Movement days:** `rain_to_days()` levels off at a 212-day Nov–May season, and counts only
+  Nov–May rainy days. The 4-days-per-rain mapping is a rough, saturating guess that isn't worth
+  refining without movement data.
+- **Kernel table:** refitted for 1–365 movement days (`src/convolutions/gregs-convolutions.R`,
+  seeded).
+  - u and v agree with the old 250-day table within 1%.
+  - max.dist (1.1 × the longest resampled walk) is noisy, varying by up to 15%.
+  - With the 212-day ceiling, no lookup comes near the end of the table.
+- **c ≥ 2** (`COLONISE_MIN`).
+- **r = 300 m** (`R_DETECT`). Fences use `max(r, r.eff)`.
+- **Thinning to non-overlapping detection discs** (`thin_overlapping()`), with TCZ units and TCZ
+  natural water always kept.
+- **One calibration pointer** (`POSTERIORS_FILE`). The legacy applications moved to
+  `src/archive/`.
+- **The Kimberley fit has no drying.** Its year sequence is fixed, not a random start
+  (`run_sims(extreme.years=)`).
+
+**Inputs:**
+- `ndays_1`, the old calibration's rain, is the BoM `rdann-1` raster (r = 1.000).
+- SILO, Nov–May only, gives 81.4 rainy days at the Kimberley points, against 52.7 for the raster
+  over the whole year. That's a ratio of 1.54 (r = 0.87), the same excess as at the TCZ.
+- SILO was fetched for 4,325 cells into `dat/silo-kimberley-rain-cache.RData`.
+  - 239 cells failed under load and were fetched again.
+  - 5 coastal or island cells (21 points) have no SILO data. They use the nearest cell with
+    data, 0.05–0.25° away.
+- Extreme reference years: 2004, 2006, 2009, 2011 and 2017. Of these, 2011 and 2017 fall in the
+  fitted 2010–2023 run.
+- Movement days have a median of 179 under the standard kernel and 198 under the extreme
+  kernel.
+- Thinning keeps 15,698 of 31,521 points, including 213 of the 311 seeds. Observed points kept:
+  2022 1,690 of 2,879, 2023 497 of 901.
+
+**ABC** (`src/ABC/`, about 1 s a run):
+- **Pilot:** prior N(3.5, 1), 400 runs. It gave a single clear peak at about 4.46.
+  - At the first prior, centred on 4.6, the whole Kimberley was colonised by 2023.
+- **Main run:** prior N(4.45, 0.2), 3,000 runs, top 5% accepted.
+  - log₁₀ λ = 4.472 (SD 0.019). The accepted range is 4.416–4.524, well inside the prior.
+  - Agreement: 98.7% of 2022 observations and 85.9% of 2023's.
+  - In 2023, 42.5 false presences against 42.7 missed presences per run, so the front isn't
+    biased.
+- **Old fit, scored the same way:** 0.997 for 2022 and 0.929 for 2023. Those figures aren't
+  directly comparable, because thinning removed many easily matched points from areas
+  colonised long ago.
+- **Against the old λ:** 5.583 at r = 100 corresponds to about 4.63 at r = 300. The new λ is
+  about 30% lower, the direction expected from c ≥ 2 and SILO's extra days.
+- **Consequence:** fence pressure relative to open water falls about 13-fold. So does every
+  calibration-dependent result, until the Phase 4 reruns.
+- **Caveat:** the posterior SD reflects only the stochastic noise in the fit. Phase 4's
+  sensitivity analysis should vary λ more widely than that.
+

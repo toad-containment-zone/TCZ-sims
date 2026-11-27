@@ -16,7 +16,7 @@ CONTROL_FENCE <- 2L
 # The one calibration every live application uses: lambda's posterior (sample.lambda,
 # sample.lambda.sd, log10 scale) from the Kimberley ABC (src/ABC/). When the calibration is
 # refitted, change this line only (docs/roadmap.md, "One calibration and model structure").
-POSTERIORS_FILE <- "dat/Posteriors_2026.RData"
+POSTERIORS_FILE <- "dat/Posteriors_2026-11-27.RData" # Phase 1 Kimberley refit (SILO two-kernel, c >= 2, r = 300 m, thinned)
 load_posteriors <- function(file = POSTERIORS_FILE) {
   load(file, envir = globalenv())
   cat("Calibration:", file, sprintf("(log10 lambda %.3f, sd %.4f)\n", sample.lambda, sample.lambda.sd))
