@@ -47,7 +47,7 @@ eval_design <- function(st, pairs, n, gens = 50, stop.on.target = TRUE, seed = 1
       if (!is.null(drying.spec)) drying.run <- draw_drying_matrix(drying.spec, idx, draw_drying_beta(drying.spec))
     }
     invisible(capture.output( # silence spread.pilb()'s progress bar
-      out <- spread.pilb(pop = st, gens = gens, pairs = pairs, delta = lambda, r = 10^2,
+      out <- spread.pilb(pop = st, gens = gens, pairs = pairs, delta = lambda, r = R_DETECT,
                          plot = FALSE, rollup = FALSE, control.step = TRUE,
                          stop.on.target = stop.on.target, drying.matrix = drying.run,
                          pairs.extreme = pairs.extreme, extreme.years = extreme.years)

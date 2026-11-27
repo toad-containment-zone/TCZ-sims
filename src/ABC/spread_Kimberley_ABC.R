@@ -11,13 +11,13 @@
 # are skipped, so a stopped run resumes.
 #
 # Usage (from the repo root):
-#   Rscript src/ABC/spread_Kimberley_ABC.R 'prior.mean=5.5' 'prior.sd=0.5' 'n.batches=20' \
+#   Rscript src/ABC/spread_Kimberley_ABC.R 'prior.mean=4.6' 'prior.sd=0.5' 'n.batches=20' \
 #     'runs.per.batch=10' 'out.dir="out/ABC-silo/pilot"' 'cores=4'
-# The prior is log10(lambda) ~ N(prior.mean, prior.sd), drawn by run_sims().
+# The prior is log10(lambda) ~ N(prior.mean, prior.sd), drawn by run_sims(); r is R_DETECT.
 #
 # Large point set: set R_MAX_VSIZE high (usethis::edit_r_environ()).
 
-prior.mean <- 5.5
+prior.mean <- 4.6 # r = 300 m: lambda * r^2 is what the data fix, so about log10(9) = 0.95 below the r = 100 fits (~5.6)
 prior.sd <- 0.5
 n.batches <- 20
 runs.per.batch <- 10

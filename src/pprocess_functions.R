@@ -22,6 +22,12 @@ load_posteriors <- function(file = POSTERIORS_FILE) {
   cat("Calibration:", file, sprintf("(log10 lambda %.3f, sd %.4f)\n", sample.lambda, sample.lambda.sd))
 }
 
+# detection radius r (m): toads within r of a waterpoint find it. lambda is calibrated given r (the
+# two trade off), so the calibration and every run must use the same value. 300 m (2026-11-27; it
+# was 100 m before) because it's closer to biology, and because a fence's target (r.eff, set by its
+# area) is absolute, so r sets how hard fences are pressed relative to open water
+R_DETECT <- 300
+
 # a point is colonised when at least this many colonists arrive (c >= 2: two arrivals can found a
 # population; roadmap Phase 1, 2026-11-27 -- it was c >= 3 before)
 COLONISE_MIN <- 2
@@ -319,7 +325,7 @@ run_sims <- function(n.sims = 100, gens, plot = FALSE, rollup,
   for (rr in 1:n.sims){ # for reps
     cat("Rep ", rr, " of ", n.sims, "\n")
     lambda.samp<-10^rnorm(1, mean=sample.lambda, sd=sample.lambda.sd)
-    r.samp<-10^2
+    r.samp <- R_DETECT
     start <- NA; extreme.years <- fixed.extreme; drying.rep <- drying.matrix
     n.ref <- if (!is.null(extreme.ref)) length(extreme.ref) else if (!is.null(drying.spec)) nrow(drying.spec$x1) else NA
     if (!is.na(n.ref)) {
@@ -590,7 +596,9 @@ spread.pilb<-function(pop, gens, pairs, delta, r, plot=FALSE, rollup,
 
   # point-specific detection radius: fenced areas use r.eff (inflated to the fenced polygon's
   # effective radius), everything else falls back to the global scalar r
-  r_vec <- if ("r.eff" %in% colnames(pop)) ifelse(is.na(pop[,"r.eff"]), r, pop[,"r.eff"]) else r
+  # a fence is never a smaller target than open water: toads still detect the water from r away, so
+  # a small fence (area radius below r) keeps r (2026-11-27)
+  r_vec <- if ("r.eff" %in% colnames(pop)) ifelse(is.na(pop[,"r.eff"]), r, pmax(r, pop[,"r.eff"])) else r
 
   if (control.step){ # static per-point masks, computed once (control.type/nats never change during the run)
     is.fence <- pop[,"control.type"]==CONTROL_FENCE

@@ -21,7 +21,7 @@
 source("src/pprocess_functions.R")
 set.seed(20260730)
 
-r <- 300 # detection radius (m), matching the qmd's assumed value
+r <- R_DETECT # detection radius (m), the model's shared value
 
 ######## Dataset 1: attrition test (tank / fence / natural points, all pre-colonised) ########
 n.per.type <- 800

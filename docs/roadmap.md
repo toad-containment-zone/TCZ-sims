@@ -64,8 +64,15 @@ archive has the reasons.
   (2026-11-27).
 - The Kimberley SILO fetch covers 4,325 cells for 1999–2026. The fetch and the ABC both run
   locally (2026-11-27).
-- r = 100 m (`run_sims()`), as the calibration and all runs have used; the methods said 300 m in
-  error (2026-11-27).
+- **r = 300 m** (`R_DETECT` in `pprocess_functions.R`), changed from 100 m (2026-11-27).
+  - 300 m is closer to biology.
+  - The calibration only fixes λ·r². A fence's target (`r.eff`) is set by its area, not by r, so
+    r sets how hard fences are pressed compared with open water.
+  - A fence is never a smaller target than open water: the model uses `max(r, r.eff)`. This
+    matters for 3 small fences, with `r.eff` of 179–219 m.
+  - At r = 300, detection circles overlap for points within 600 m. That's 24,090 of 31,521
+    Kimberley points. This is accepted and stated in the methods; the dedup distance stays at
+    100 m.
 
 ## Applications
 
