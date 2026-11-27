@@ -39,7 +39,8 @@ tcz.points <- tcz.points |>
     ),
     fence.units = coalesce(distance, 0) / 1000 + coalesce(n.gates, 0), # distance is metres -> km, + gate count
     fence.area = if_else(control.type == "fence", (distance / 4)^2, NA_real_), # distance = full perimeter (m); assume square -> side = distance/4, area = side^2
-    art_nat = as.integer(!origin_des) # setup() wants 1 = artificial, 0 = natural (natural points get the drying test)
+    art_nat = as.integer(!origin_des), # setup() wants 1 = artificial, 0 = natural (natural points get the drying test)
+    keep.thin = within_tcz & origin_des # natural water inside the TCZ is never thinned away (project lead, 2026-11-27)
   ) |>
   rename(TCZ = inside_tcz) # to match required name in setup()
 
@@ -88,14 +89,14 @@ setup(point.data = tcz.points,
       present.id = "colonised",
       artificial.natural.id = "art_nat",
       rain.id = "rain.mean", # SILO mean rainy days (not the raster's `rainfall`)
-      threshold = 100,
       constant.rain = NULL,
       trunc.dist = TRUE,
       TCZ = FALSE, # keep TCZ artificial points in: they're modelled as tanks/fences via the control step, not removed
       control.type.id = "control.type",
       fence.area.id = "fence.area",
       fence.units.id = "fence.units",
-      rain.extreme.id = "rain.extreme") # builds pairs.extreme
+      rain.extreme.id = "rain.extreme", # builds pairs.extreme
+      keep.id = "keep.thin")
 
 # every TCZ intervention unit must survive setup()'s spatial de-duplication, and nothing outside
 # the TCZ may carry a control

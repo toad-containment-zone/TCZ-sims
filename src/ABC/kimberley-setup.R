@@ -52,7 +52,6 @@ setup(point.data = k.points,
       rain.id = "rain.mean",
       rain.extreme.id = "rain.extreme",
       observations = c("X2021_pres", "X2022_pres", "X2023_pres"),
-      threshold = 100,
       constant.rain = NULL,
       trunc.dist = TRUE,
       TCZ = FALSE)

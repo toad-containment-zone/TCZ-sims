@@ -280,6 +280,44 @@ rain_to_days <- function(rain.days, days.per.rain = 4, season.days = 212){
 
 # Finds points closer than threshold distance apart and removes one of the points
 # returns a filtered population table, and a filtered pairwise distance table
+# Thins points so that no two detection discs overlap (2026-11-27). Each point's disc has radius
+# rho = max(r, r.eff) (r.eff: a fence's effective radius, NA elsewhere), and two points conflict when
+# they are closer than rho_i + rho_j. With non-overlapping discs, each propagule's chances of landing
+# at each point are separate pieces of one kernel and sum to at most 1, as the multinomial in
+# spread.pilb() needs. Overlap double-counts arrivals where points cluster (pools along a river).
+# Survivors are chosen greedily in priority order:
+#   1. controlled points (control.type != CONTROL_NONE: TCZ intervention units) and any point flagged
+#      in `keep` (e.g. natural waterpoints inside the TCZ, so uncontrolled water beside a unit isn't
+#      hidden) -- always kept, even where they overlap each other (reported);
+#   2. already-colonised points, so thinning doesn't pull the invasion front back;
+#   3. points carrying observations (observation columns, e.g. the ABC's presence data);
+#   4. targets; 5. everything else. Ties keep the input order.
+# Returns list(pairs = distance matrix among survivors, spread.table = survivors).
+thin_overlapping <- function(pop.mat, r, obs.cols = NULL, keep = NULL) {
+  n <- nrow(pop.mat)
+  cat("Calculating pairwise distance matrix...\n")
+  d <- pdist(pop.mat[, "X"], pop.mat[, "Y"])
+  rho <- if ("r.eff" %in% colnames(pop.mat)) pmax(r, pop.mat[, "r.eff"], na.rm = TRUE) else rep(r, n)
+  controlled <- if ("control.type" %in% colnames(pop.mat)) pop.mat[, "control.type"] != CONTROL_NONE else rep(FALSE, n)
+  if (!is.null(keep)) controlled <- controlled | (!is.na(keep) & as.logical(keep)) # never removed
+  observed <- if (length(obs.cols)) rowSums(!is.na(pop.mat[, obs.cols, drop = FALSE])) > 0 else rep(FALSE, n)
+  tier <- ifelse(controlled, 1, ifelse(pop.mat[, "Pres"] == 1, 2, ifelse(observed, 3, ifelse(pop.mat[, "target"] == 1, 4, 5))))
+  cat("Thinning to non-overlapping detection discs (r =", r, "m)...\n")
+  state <- rep(NA, n) # TRUE kept, FALSE removed, NA undecided
+  for (i in order(tier, seq_len(n))) {
+    if (!is.na(state[i])) next
+    state[i] <- TRUE
+    clash <- d[, i] < rho + rho[i] & is.na(state) & !controlled # controlled and kept points are never removed
+    state[clash] <- FALSE
+  }
+  keep <- state
+  unit.clash <- sum(d[controlled, controlled, drop = FALSE] < outer(rho[controlled], rho[controlled], "+")) - sum(controlled)
+  cat(sprintf("  kept %d of %d points (removed %d: %d colonised, %d observed, %d targets)\n",
+              sum(keep), n, sum(!keep), sum(!keep & tier == 2), sum(!keep & tier == 3), sum(!keep & tier == 4)))
+  if (unit.clash > 0) cat(sprintf("  note: %d pair(s) of always-kept points (units%s) overlap each other\n", unit.clash / 2, if (is.null(keep)) "" else " and keep.id points"))
+  list(pairs = d[keep, keep], spread.table = pop.mat[keep, , drop = FALSE])
+}
+
 remove_spatial_duplicates <- function(pop.mat, threshold){
   X <- pop.mat[,"X"]
   Y <- pop.mat[, "Y"]
@@ -415,7 +453,9 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
                   rain.id = "rain_1mm",
                   observations = NULL,
                   remove_duplicates = TRUE,
-                  threshold = 100, # metres within which to filter out duplicates
+                  threshold = NULL, # retired (2026-11-27): points are now thinned to non-overlapping detection discs (thin_overlapping())
+                  r = R_DETECT, # detection radius, for the thinning
+                  keep.id = NULL, # name of a logical column: points never removed by the thinning (as units aren't)
                   constant.rain = NULL, # else number of days you want across whole area
                   trunc.dist = TRUE, # false for full kernel
                   TCZ = FALSE, # implement the TCZ, or not?
@@ -538,8 +578,10 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
     spread.table <- cbind(spread.table, obs = as.matrix(pData[observations]))
   }
   
+  if (!is.null(threshold)) stop("setup(threshold=) is retired: remove_duplicates now thins to non-overlapping detection discs of radius r (thin_overlapping())")
   if (remove_duplicates) {
-    outList <- remove_spatial_duplicates(spread.table, threshold)
+    outList <- thin_overlapping(spread.table, r, obs.cols = observations,
+                                keep = if (!is.null(keep.id)) pData[[keep.id]] else NULL)
   }else {
     cat("Calculating pairwise distance matrix...\n")
     pairs_pdist<-pdist(X = spread.table[, "X"],Y = spread.table[, "Y"])

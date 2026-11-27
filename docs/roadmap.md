@@ -70,9 +70,17 @@ archive has the reasons.
     r sets how hard fences are pressed compared with open water.
   - A fence is never a smaller target than open water: the model uses `max(r, r.eff)`. This
     matters for 3 small fences, with `r.eff` of 179–219 m.
-  - At r = 300, detection circles overlap for points within 600 m. That's 24,090 of 31,521
-    Kimberley points. This is accepted and stated in the methods; the dedup distance stays at
-    100 m.
+  - Points are thinned so that no detection discs overlap (`thin_overlapping()`, which replaced
+    the 100 m dedup). Overlapping discs double-count arrivals and break the multinomial: at
+    r = 300 with the 100 m dedup, the median disc was 44% double-counted, and 53 Kimberley
+    sources had more than 100% of their propagules "landing" (2026-11-27).
+    - Survivors are chosen by priority: units, then colonised points, then observed points,
+      then targets, then the rest.
+    - Units and natural waterpoints inside the TCZ are always kept, even where they overlap
+      (44 pairs at the TCZ). Without this, a spring beside a tank would be hidden and the place
+      would be modelled as controlled (`setup(keep.id=)`).
+    - In the Kimberley this keeps 15,698 of 31,521 points; at the TCZ it keeps 619 of 848,
+      including all 22 Living Waters points.
 
 ## Applications
 
