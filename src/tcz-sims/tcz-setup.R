@@ -70,13 +70,13 @@ ggplot() +
 
 ######## year-by-year rainfall: extreme wet years and extreme-year rainy days (rain-years.R) ########
 source("src/tcz-sims/rain-years.R")
-rain.years <- rain_years(tcz.points)
 # both kernels come from SILO: the standard kernel from each point's mean rainy days over the
-# reference years (replacing the rainfall raster used by forecast.R), the extreme kernel from its
-# maximum (project lead's decision, 2026-11-26)
-tcz.points$rain.mean <- rain.years$point.rain.days.mean
-tcz.points$rain.extreme <- rain.years$point.rain.days.max
-stopifnot(!anyNA(tcz.points$rain.mean), !anyNA(tcz.points$rain.extreme))
+# reference years, the extreme kernel from its maximum (project lead's decision, 2026-11-26).
+# The same helper sets up forecast.R and the null model.
+silo <- attach_silo_kernels(tcz.points)
+tcz.points <- silo$points
+rain.years <- silo$rain.years
+rm(silo)
 
 ######## load simulation posteriors ########
 load_posteriors() # the shared calibration, POSTERIORS_FILE in pprocess_functions.R
@@ -111,14 +111,8 @@ stopifnot(all(spread.table[is.na(sim.unit), "control.type"] == CONTROL_NONE))
 ######## natural-point drying (drying-model.R) ########
 # TO assessment decides whether a point dries; DEA (via the glmer) only how drying responds to rainfall
 source("src/tcz-sims/drying-model.R")
-dea.annual <- dea_drying(living.waters)
-drying.response <- fit_drying_response(dea.annual, rain_years(attr(dea.annual, "points")))
-if (drying.response$singular || any(drying.response$beta >= 0))
-  stop("drying glmer is singular or has non-negative rainfall slopes; check before using it")
-sim.rows <- spread.table[, "ID"] # spread.table rows -> tcz.points rows (after de-duplication)
-drying.spec <- drying_spec(st_drop_geometry(tcz.points)[sim.rows, ], rain.years$point.cell[sim.rows],
-                           rain.years, drying.response, p.avg = 0.25)
-stopifnot(all(drying.spec$class[spread.table[, "nats"] == 0] == "never")) # only natural points can dry
+# spread.table rows -> tcz.points rows (after thinning); shared with forecast.R
+drying.spec <- build_drying_spec(tcz.points, spread.table[, "ID"], rain.years, living.waters, p.avg = 0.25)
 
 # unit metadata aligned row-for-row with spread.table (NA rows = not a TCZ unit), for the optimiser
 tcz.units.sim <- st_drop_geometry(tcz.units)[match(sim.unit, tcz.units$unit_id),

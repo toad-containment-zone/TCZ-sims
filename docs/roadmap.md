@@ -13,7 +13,7 @@ we start it, and this file is updated as phases change or finish. It replaces
 [`docs/archive/optimisation-plan-2026-11.md`](archive/optimisation-plan-2026-11.md): the record of
 optimisation steps 1–6, with every decision, result table and check.
 
-## Where we are (2026-11-27)
+## Where we are (2026-11-28)
 
 - **Optimisation steps 1–6 are done** on branch `tcz-optimisation` (see the archive).
   - The model has the control step, intervention units, eradication responses, the
@@ -29,10 +29,15 @@ optimisation steps 1–6, with every decision, result table and check.
     `POSTERIORS_FILE` points to it, so every live application now uses it.
   - The model structure changed with it: c ≥ 2, `season.days = 212`, kernels for 1–365 days,
     r = 300 m, and thinning to non-overlapping discs. See the standing decisions.
-  - **Every TCZ, forecast and null-model output on disk is now stale,** including the provisional
-    design above. They were run with the old λ and structure.
-- **The annual forecast (`forecast.R`)** still uses the rainfall raster and one kernel. It is
-  frozen at `season.days = 365` until Phase 2, but now runs on the new calibration.
+  - **Every TCZ output on disk is stale,** including the provisional design above. They were run
+    with the old λ and structure, and are rerun in Phase 4.
+- **Phase 2 (forecast and null model) is done (2026-11-28).** Both now run on the shared
+  calibration and structure; see "Detailed phase plans".
+  - The new forecast has toads first reaching the TCZ in **2031** (median; 2031–2032 in 93% of
+    1,000 runs), against 2033 in the September 2026 forecast.
+  - The null model's average front speed matches the observed one (27–28 km a year against 29.3),
+    but it doesn't reproduce the year-to-year swings.
+  - The public site still shows the September forecast until Phase 5.
 
 ## Standing decisions (carried forward)
 
@@ -98,8 +103,8 @@ everything except λ, which changes for all of them when Phase 1 sets `POSTERIOR
 |---|---|---|
 | `src/ABC/` (the calibration itself) | SILO mean + extreme, real 2010–23 sequence | Done (Phase 1) |
 | `tcz-setup.R` → `tcz-sims.R`, `tcz-optimise.R` | SILO mean + extreme, random start, drying | Aligned; final runs in Phase 4 |
-| `forecast.R` → public site | raster, one kernel, `season.days = 365` | Phase 2 |
-| `null-model/predict-front-displacement.R` | raster / all-year SILO per year, `season.days = 365` | Phase 2 |
+| `forecast.R` → public site | SILO mean + extreme, random start, drying | Done (Phase 2); site in Phase 5 |
+| `null-model/predict-front-displacement.R` | SILO mean + extreme, real extreme years; per-year Nov–May SILO | Done (Phase 2) |
 | `control-step-demo.R` (synthetic checks) | constant movement days | Aligned |
 
 Archived on 2026-11-27 (`src/archive/README.md`): `tingley-sims/`, `pilbara-impact-sims/` (Dunlop
@@ -132,7 +137,7 @@ The phases are in dependency order: each uses only the outputs of earlier phases
      data, as `spread_Kimberley_ABC_concat.R` does.
    - Save the posteriors as `dat/Posteriors_<date>.RData`, compare them with
      `Posteriors_2026.RData`, and update the methods' calibration paragraph.
-2. **Annual forecast** (`src/tcz-sims/forecast.R`).
+2. **Annual forecast** (`src/tcz-sims/forecast.R`). **Done 2026-11-28**; see "Detailed phase plans".
    - Use the Phase 1 posteriors and SILO mean rainy days in place of the raster
      (`rain.id = "rainfall"`).
    - Add inter-annual variation as the optimisation runs have it: a random reference-year start
@@ -273,3 +278,56 @@ The phases are in dependency order: each uses only the outputs of earlier phases
 - **Caveat:** the posterior SD reflects only the stochastic noise in the fit. Phase 4's
   sensitivity analysis should vary λ more widely than that.
 
+### Phase 2: annual forecast and null model (done 2026-11-28)
+
+**What was done:**
+- **One shared input path.** `attach_silo_kernels()` (`rain-years.R`) adds each point's SILO mean
+  and extreme Nov–May rainy days; `build_drying_spec()` (`drying-model.R`) fits the DEA response and
+  builds the drying spec. `tcz-setup.R`, `forecast.R` and the null model all use them.
+  `tcz-setup.R` on the helpers reproduces its `spread.table`, `pairs`, `pairs.extreme`,
+  `drying.spec` and unit tables exactly.
+- **Forecast** (`forecast.R`): SILO mean and extreme kernels, `season.days = 212`, a random
+  reference-year start per run, and drying. The control step is on only for drying. 1,000 runs.
+  It no longer writes the site data unless `UPDATE_SITE <- TRUE`, so the site changes once, in
+  Phase 5.
+- **Null model**: its own SILO fetch is replaced by `rain_years()` on the Kimberley cache
+  (`dat/silo-actual-rain-days-cache.RData` is retired). The static scenario uses the mean and
+  extreme kernels with real extreme years; the per-year scenario uses each season's Nov–May
+  rainy days.
+- Baselines: `out/forecast-baseline-2026-09/` and `out/null-model/baseline-2026-08/`.
+  `src/tcz-sims/compare-forecast.R` writes `out/forecast-comparison/`.
+
+**Inputs:**
+- Forecast: 3,295 points after thinning, from 1,290 SILO cells (983 newly fetched into the TCZ
+  cache). Extreme reference years 2004, 2011, 2017, 2018 and 2025. Only 16 points can dry, 6 of
+  them outside the TCZ, so drying barely affects the forecast.
+- Null model: 1,060 SILO cells (545 newly fetched). Its region's extreme years are 2011, 2017,
+  2018, 2021 and 2023, so of the simulated seasons (2023–2026) only 2023 is extreme.
+
+**Forecast, year toads first reach the TCZ:**
+
+| | Runs | Median | 10–90% | By 2030 |
+|---|---|---|---|---|
+| September 2026 (old λ and structure) | 100 | 2033 | 2032–2034 | 0% |
+| Phase 2 | 1,000 | 2031 | 2031–2032 | 3.9% |
+
+Away from the TCZ, arrival is 0.7–0.8 years earlier at the 1,708 points matched within 100 m. We
+didn't split the change between its causes (the lead's decision, 2026-11-28). c ≥ 2 (was c ≥ 3),
+SILO's extra rainy days and r = 300 m all speed spread up, against a λ about 30% lower; the
+null model says the combination matches the observed average speed.
+
+**Null model, median front movement per year (km):**
+
+| Start year (season) | Observed | Static | Per-year rain | Old static | Old per-year |
+|---|---|---|---|---|---|
+| 2022 (2023, extreme) | 57.3 | 32.7 | 30.0 | 28.1 | 36.6 |
+| 2023 (2024) | 18.7 | 26.3 | 22.2 | 25.9 | 25.7 |
+| 2024 (2025) | 16.9 | 28.6 | 31.9 | 31.4 | 44.3 |
+| 2025 (2026) | 24.4 | 24.2 | 24.5 | 24.2 | 36.0 |
+| Mean | 29.3 | 28.0 | 27.2 | 27.4 | 35.6 |
+
+- The average speed is right. The old calibration's per-year version was about 20% fast.
+- The model doesn't reproduce the swings between years (17–57 km observed, about 22–33 simulated),
+  and rainfall doesn't explain them: 2024–25 had the most rainy days (81) and the slowest movement.
+- The observed displacements have 90% intervals of only about ±0.3 km, which looks too narrow;
+  a question for the front fit in `invasion-front-monitoring`, not for λ.

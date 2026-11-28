@@ -468,7 +468,7 @@ setup <- function(point.data = "dat/art_nat_clp.csv",
                   col.year.id = NULL, # name of a column giving each point's known historical colonisation year (NA if unknown/not colonised)
                   start.year = NULL, # forecast start year; required when col.year.id is supplied, to convert a colonisation year into a generation offset
                   rain.extreme.id = NULL, # name of a column giving each point's rainy days in an extreme wet year -- builds pairs.extreme, the extreme-year dispersal matrix
-                  season.days = 212 # movable season for rain_to_days() (Nov-May); forecast.R passes 365 until Phase 2 moves it to SILO
+                  season.days = 212 # movable season for rain_to_days() (Nov-May); every live application uses it
 ){
   cat("Loading kernel parameters...\n")
   load("dat/Kernel-fits_truncated.RData")

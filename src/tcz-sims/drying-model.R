@@ -134,3 +134,19 @@ draw_drying_matrix <- function(spec, idx, beta = spec$beta) {
 draw_drying_beta <- function(spec) {
   as.numeric(spec$beta + t(chol(spec$vcov)) %*% rnorm(2))
 }
+
+# The shared drying path for tcz-setup.R and forecast.R: fit the DEA rainfall response for the
+# Living Waters points (`lw`, from load-data.R) and build the drying spec for the simulated points.
+# `points` is the point set given to setup() (with art_nat, lw_record_id and group_assessment);
+# `sim.rows` = spread.table[, "ID"], its rows that survived thinning; `rain.years` comes from
+# rain_years() on that same point set.
+build_drying_spec <- function(points, sim.rows, rain.years, lw, p.avg = 0.25) {
+  dea.annual <- dea_drying(lw)
+  response <- fit_drying_response(dea.annual, rain_years(attr(dea.annual, "points")))
+  if (response$singular || any(response$beta >= 0))
+    stop("drying glmer is singular or has non-negative rainfall slopes; check before using it")
+  pts <- st_drop_geometry(points)[sim.rows, ]
+  spec <- drying_spec(pts, rain.years$point.cell[sim.rows], rain.years, response, p.avg = p.avg)
+  stopifnot(all(spec$class[pts$art_nat != 0] == "never")) # only natural points can dry
+  spec
+}

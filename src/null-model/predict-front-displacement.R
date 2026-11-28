@@ -9,9 +9,12 @@
 # bbox.fit, mean.coord, scale, years.all) to already exist in $DATA_PATH --
 # produced by (re-)running that script in invasion-front-monitoring.
 #
-# STATUS (2026-11-27): frozen at the old model structure (raster / all-year SILO rainy days,
-# season.days = 365) until Phase 2 of docs/roadmap.md moves it onto the shared SILO two-kernel
-# structure with forecast.R. It does run at c >= 2 and on the shared calibration.
+# STATUS (2026-11-28, Phase 2 of docs/roadmap.md): on the shared calibration and model structure.
+# Rain comes from SILO via rain-years.R (Nov-May rainy days, season.days = 212), with two scenarios:
+#   - static: each point's mean and extreme kernels over the 2002-2026 reference years, switching
+#     to the extreme kernel in years that were extreme by the top-20% rule;
+#   - actual rainfall: each season's own Nov-May rainy days per cell, one kernel.
+# Results are an out-of-sample check of the Kimberley calibration against observed front movement.
 #
 # Notes:
 # - The starting front for year k is fixed at its posterior mean (a, b_k) -- not
@@ -108,9 +111,6 @@ all.points <- st_read(file.path(spatial.dir, "Edited-layers/merged-points.shp"))
   st_transform(crs = 3577) |>
   st_filter(survey.point.bbox, .predicate = st_within)
   
-rainfall.vals <- terra::extract(rainfall.raster, terra::vect(all.points))
-all.points <- all.points |>
-  mutate(rainfall = rainfall.vals[[2]])
 
 ####### Bring in estimated invasion front(s) and scored colonised points #######
 colnsd <- score_colonised_multi_year(all.points)
@@ -124,6 +124,18 @@ albers <- all.points |>
   st_coordinates()
 all.points <- bind_cols(all.points, albers)
 
+
+
+######## SILO rain: the shared two-kernel inputs and per-year rainy days (rain-years.R) ########
+# The front region is on the Kimberley side, so its cells share the Kimberley ABC's SILO cache
+# (keyed per cell; any new cells are fetched into it). This replaces the script's own SILO fetch
+# and dat/silo-actual-rain-days-cache.RData (Phase 2, 2026-11-28).
+source("src/tcz-sims/rain-years.R")
+all.points$art_nat <- as.integer(!coalesce(all.points$origin_des == "Natural", FALSE)) # 1 = artificial, 0 = natural (no control step here)
+silo <- attach_silo_kernels(all.points, cache = "dat/silo-kimberley-rain-cache.RData")
+all.points <- silo$points
+rain.years <- silo$rain.years
+rm(silo)
 
 ######## load simulation posteriors ########
 load_posteriors() # the shared calibration, POSTERIORS_FILE in pprocess_functions.R
@@ -180,52 +192,33 @@ fit_b_threshold <- function(D, Pres) {
   stopifnot(abs(b.rec - b.true) < diff(range(D.test)) / length(D.test) * 2)
 }
 
-######## build spread table + dispersal matrix once (year-invariant part of setup()) ########
-# Everything setup() computes other than Pres/age/occ.years/first.col.gen -- point geometry,
-# the deduplicated point set, per-point kernel params (u/v/max.dist/area, from rainfall only),
-# and above all the sparse pairwise dispersal matrix `pairs` (the expensive O(n^2)-ish step) --
-# depends only on point location and rainfall, never on colonisation state. So it only needs
-# building once; each year below just overwrites the colonisation-dependent columns of the
-# global spread.table in place before calling run_sims(), instead of rebuilding from scratch.
-# present_k is a placeholder here (overwritten every iteration below); TCZ/control-step args are
-# left at their defaults (no targets, no control step) so target/control columns stay constant.
-all.points$present_k <- 0L
-setup(point.data = all.points,
-      X.id = "X",
-      Y.id = "Y",
-      present.id = "present_k",
-      artificial.natural.id = "origin_des",
-      rain.id = "rainfall",
-      constant.rain = NULL,
-      trunc.dist = TRUE,
-      TCZ = FALSE,
-      season.days = 365) # the raster counts rainy days all year: frozen at the old mapping until Phase 2
-
-# original all.points row index for each surviving (post-dedup) spread.table row, so a given
-# year's present_k (indexed by all.points row) can be aligned to spread.table's row order
-kept.ids <- spread.table[, "ID"]
-
 ######## years to simulate forward from (every year except the last has a "next year") ########
+# A front fitted to year yr's surveys moves in the following wet season: season year yr + 1
+# (Jul yr to Jun yr + 1, rain-years.R), so that season's rain and extreme flag drive the step.
 sim.years <- years.all[-length(years.all)]
+season.of <- sim.years + 1
+if (!all(season.of %in% rain.years$ref$season.year))
+  stop("season years ", paste(setdiff(season.of, rain.years$ref$season.year), collapse = ", "),
+       " are outside the SILO reference years (rain-years.R, rain.ref.years)")
+extreme.of <- rain.years$ref$extreme[match(season.of, rain.years$ref$season.year)]
+cat("Season years", paste(season.of, collapse = ", "), "| extreme:",
+    paste(season.of[extreme.of], collapse = ", "), "\n")
 n.sims <- 100 # sim reps per year -- raise for a smoother null distribution (runtime scales linearly)
 
-null.results <- vector("list", length(sim.years))
-
-for (tt in seq_along(sim.years)) {
+######## one year: start from that year's front, run one generation, recover the new front ########
+# Uses the global spread.table/pairs (and pairs.extreme) from the last setup() call. The
+# colonisation-dependent columns are overwritten in place: exactly what setup() would compute for
+# them given col.year.id = NULL (see pprocess_functions.R), without rebuilding the dispersal matrix.
+simulate_year <- function(tt, extreme = NULL, pairs.extreme = NULL) {
   yr <- sim.years[tt]
-  cat("\n==== Year", yr, "====\n")
-
-  ######## starting colonisation state for this year, from the multi-year front ########
-  # written directly into spread.table's Pres/age/occ.years/first.col.gen columns -- this is
-  # exactly what setup() would compute for these columns given col.year.id = NULL (see
-  # pprocess_functions.R), just without rebuilding the dispersal matrix each time
+  kept.ids <- spread.table[, "ID"] # all.points row for each thinned spread.table row
   present_k_full <- ifelse(!is.na(all.points$colonisation_year) &
-                              all.points$colonisation_year <= yr, 1L, 0L)
+                             all.points$colonisation_year <= yr, 1L, 0L)
   present_k <- present_k_full[kept.ids]
-  spread.table[, "Pres"] <- present_k
-  spread.table[, "age"] <- present_k
-  spread.table[, "occ.years"] <- present_k
-  spread.table[, "first.col.gen"] <- ifelse(present_k == 1, 0, NA_real_)
+  spread.table[, "Pres"] <<- present_k
+  spread.table[, "age"] <<- present_k
+  spread.table[, "occ.years"] <<- present_k
+  spread.table[, "first.col.gen"] <<- ifelse(present_k == 1, 0, NA_real_)
 
   ######## sanity check: threshold-fit should recover ~b_k from the (deterministic) starting state ########
   b_k <- b_metres(tt)
@@ -236,9 +229,9 @@ for (tt in seq_along(sim.years)) {
   cat("  Sanity check: b recovered from starting state =", round(b0.check),
       "m vs fitted b_k =", round(b_k), "m (diff =", round(b0.check - b_k), "m)\n")
 
-  ######## run one generation (= one year) forward, many reps ########
+  ######## run one generation (= one wet season) forward, many reps ########
   sim_out <- run_sims(n.sims = n.sims, gens = 1, plot = FALSE, rollup = FALSE,
-                       stop.on.target = FALSE)
+                      stop.on.target = FALSE, pairs.extreme = pairs.extreme, extreme.years = extreme)
 
   ######## fit b_sim per rep, restricted to the empirical fitting bbox ########
   disp.sim.km <- vapply(sim_out, function(rep) {
@@ -257,270 +250,89 @@ for (tt in seq_along(sim.years)) {
   }
 
   ######## empirical comparison: delta[tt] = displacement from years.all[tt] to years.all[tt+1] ########
-  disp.emp.km <- post.samples[, paste0("delta[", tt, "]")]
+  list(year = yr,
+       season.year = season.of[tt],
+       sim = disp.sim.km,
+       empirical = post.samples[, paste0("delta[", tt, "]")],
+       n.degenerate = n.degenerate,
+       n.sims = n.sims)
+}
 
-  null.results[[tt]] <- list(year = yr,
-                              sim = disp.sim.km,
-                              empirical = disp.emp.km,
-                              n.degenerate = n.degenerate,
-                              n.sims = n.sims)
+######## STATIC SCENARIO: SILO mean and extreme kernels, real extreme years ########
+# Built once: every point's standard kernel from its mean Nov-May rainy days over the reference
+# years and its extreme kernel from the maximum (attach_silo_kernels(), as in the TCZ runs and the
+# forecast); each year uses the extreme kernel if its season year was extreme by the top-20% rule.
+# present_k is a placeholder (overwritten per year); no targets and no control step.
+all.points$present_k <- 0L
+setup(point.data = all.points,
+      X.id = "X",
+      Y.id = "Y",
+      present.id = "present_k",
+      artificial.natural.id = "art_nat",
+      rain.id = "rain.mean",
+      rain.extreme.id = "rain.extreme",
+      constant.rain = NULL,
+      trunc.dist = TRUE,
+      TCZ = FALSE)
+
+null.results <- vector("list", length(sim.years))
+for (tt in seq_along(sim.years)) {
+  cat("\n==== [static] Year", sim.years[tt], "( season", season.of[tt], if (extreme.of[tt]) "extreme" else "", ") ====\n")
+  null.results[[tt]] <- simulate_year(tt, extreme = extreme.of[tt], pairs.extreme = pairs.extreme)
 }
 names(null.results) <- sim.years
 
-######## assemble comparison data and plot ########
-comparison.df <- do.call(rbind, lapply(null.results, function(x) {
-  rbind(
-    data.frame(year = x$year, source = "empirical", distance_km = abs(x$empirical)),
-    data.frame(year = x$year, source = "simulated (null)", distance_km = abs(x$sim[!is.na(x$sim)]))
-  )
-}))
-
-dir.create("out/null-model", showWarnings = FALSE)
-save(null.results, comparison.df, file = "out/null-model/front-displacement-null-vs-empirical.RData")
-
-print(
-  ggplot(comparison.df, aes(x = factor(year), y = distance_km, fill = source)) +
-    geom_violin(alpha = 0.6, colour = NA, position = position_dodge(width = 0.8)) +
-    geom_boxplot(width = 0.1, outlier.shape = NA, position = position_dodge(width = 0.8)) +
-    geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
-    labs(x = "Starting year", y = "Perpendicular front movement (km)", fill = NULL) +
-    theme_bw()
-)
-ggsave("out/null-model/front-displacement-null-vs-empirical.pdf", width = 160, height = 120, units = "mm")
-
-######## degenerate-rep summary across all years ########
-degen <- vapply(null.results, `[[`, numeric(1), "n.degenerate")
-if (any(degen > 0)) {
-  cat("\nDegenerate (whole-bbox-one-sided) reps by year:\n")
-  print(setNames(degen, sim.years))
-}
-
-######################################################################
-######## ACTUAL-RAINFALL SCENARIO: how much of the empirical/null ########
-######## discrepancy is explained by real interannual rainfall?   ########
-######################################################################
-# Everything below is a second, fully independent set of sims that swaps the static
-# climatological rain-days-per-year value used above (rainfall.raster / all.points$rainfall,
-# a single long-run-average value per point, loaded in load-data.R and reused unchanged
-# for every simulated year) for the ACTUAL number of >=1mm rain-days recorded at each
-# point during its relevant wet season (1 Jul of the starting year -- 30 Jun of the
-# following year -- the same "one generation = one wet season" convention documented at
-# the top of this script), sourced from SILO. Nothing above this point is touched or
-# reused for global state (spread.table/pairs get rebuilt fresh below); the two scenarios
-# are combined only at the very end, into one three-way comparison plot.
-library(weatherOz)
-
-######## unique SILO DataDrill grid cells covering all.points (dedup to keep API calls tractable) ########
-# all.points covers thousands of waterpoints, but SILO's DataDrill product is a 0.05-degree
-# (~5km) interpolated grid -- querying every point individually would be thousands of
-# redundant calls for the same cell, so points are rounded onto the grid and only unique
-# cells are queried.
-silo.cell.res <- 0.05
-point.lonlat <- all.points |>
-  st_transform(crs = 4326) |>
-  st_coordinates()
-all.points$silo_lon <- round(point.lonlat[, "X"] / silo.cell.res) * silo.cell.res
-all.points$silo_lat <- round(point.lonlat[, "Y"] / silo.cell.res) * silo.cell.res
-# fixed-width key: round()*0.05 can leave floating-point crumbs (122.05000000000001), which
-# would make the cache key representation-dependent across sessions/joins
-all.points$silo_cell <- sprintf("%.2f_%.2f", all.points$silo_lon, all.points$silo_lat)
-
-unique.cells <- all.points |>
-  st_drop_geometry() |>
-  distinct(silo_cell, silo_lon, silo_lat)
-cat("\n", nrow(unique.cells), "unique SILO grid cells covering", nrow(all.points), "points\n")
-
-######## wet-season windows needed: one per sim.years entry (Jul yr -- Jun yr+1) ########
-wet.season.start <- function(yr) as.Date(paste0(yr, "-07-01"))
-wet.season.end   <- function(yr) as.Date(paste0(yr + 1, "-06-30"))
-fetch.start <- wet.season.start(min(sim.years))
-fetch.end   <- wet.season.end(max(sim.years))
-
-######## fetch (with an on-disk cache) daily rainfall per unique grid cell ########
-SILO_KEY <- Sys.getenv("SILO_API_KEY")
-silo.cache.path <- "dat/silo-actual-rain-days-cache.RData"
-if (file.exists(silo.cache.path)) {
-  # brings in `silo.daily.cache` (one row per silo_cell/day already fetched) and
-  # `silo.cache.range` (the date span those rows were fetched over)
-  load(silo.cache.path)
-  # a cached cell is only reusable if its rows actually span the range we now need -- otherwise
-  # (e.g. years.all has gained a year since the cache was written) cells would look "already
-  # fetched" while silently missing days, truncating this year's rain-day counts
-  if (!exists("silo.cache.range") || silo.cache.range["start"] > fetch.start ||
-      silo.cache.range["end"] < fetch.end) {
-    cat("SILO cache does not cover", as.character(fetch.start), "--", as.character(fetch.end),
-        "; discarding and refetching\n")
-    silo.daily.cache <- data.frame()
-  }
-} else {
-  silo.daily.cache <- data.frame()
-}
-
-cached.cells <- if (nrow(silo.daily.cache) > 0) unique(silo.daily.cache$silo_cell) else character(0)
-to.fetch <- unique.cells |> filter(!silo_cell %in% cached.cells)
-cat(nrow(to.fetch), "grid cells need fetching from SILO (", length(cached.cells), "already cached)\n")
-
-fetch_silo_cell <- function(cell, lon, lat) {
-  cat("  Fetching", cell, "\n")
-  tryCatch(
-    get_data_drill(longitude = lon, latitude = lat,
-                    start_date = fetch.start, end_date = fetch.end,
-                    values = "rain", api_key = SILO_KEY) |>
-      as.data.frame() |>
-      # date rebuilt from year/month/day rather than taken from SILO's own `date` column,
-      # whose returned format (Date vs YYYYMMDD string) is ambiguous and would silently
-      # break as.Date() downstream
-      select(year, month, day, rainfall) |>
-      mutate(silo_cell = cell),
-    error = function(e) {
-      warning("SILO fetch failed for ", cell, ": ", conditionMessage(e))
-      NULL
-    }
-  )
-}
-
-if (nrow(to.fetch) > 0) {
-  new.daily <- purrr::pmap(list(to.fetch$silo_cell, to.fetch$silo_lon, to.fetch$silo_lat), fetch_silo_cell) |>
-    bind_rows()
-  silo.daily.cache <- bind_rows(silo.daily.cache, new.daily)
-  silo.cache.range <- c(start = fetch.start, end = fetch.end)
-  save(silo.daily.cache, silo.cache.range, file = silo.cache.path)
-}
-silo.daily.cache <- silo.daily.cache |>
-  mutate(date = as.Date(sprintf("%04d-%02d-%02d", year, month, day)))
-
-######## aggregate daily rainfall into per-wet-season rain-day counts (>=1mm), per cell ########
-# ">=1mm" matches the threshold already used by the static climatological raster
-# (rdann-1.asc, "days where at least 1mm of rain falls" -- see load-data.R) so the two
-# scenarios are otherwise like-for-like.
-rain.days.by.cell.year <- purrr::map_dfr(sim.years, function(yr) {
-  silo.daily.cache |>
-    filter(date >= wet.season.start(yr), date <= wet.season.end(yr)) |>
-    group_by(silo_cell) |>
-    summarise(rain.days = sum(rainfall >= 1, na.rm = TRUE), .groups = "drop") |>
-    mutate(year = yr)
-})
-
-######## clip to the dispersal-kernel-fits table's valid range ########
-# setup() uses rain_to_days()'s output as a direct row index into `fits`
-# (dat/Kernel-fits_truncated.RData); rain-days values above a certain point map to a
-# row beyond the table (fits[u, ] silently returns NA kernel params for that point).
-# The static climatological raster never seems to reach this range, but a real wet
-# wet-season plausibly could, so any point-year's rain-days input is capped at the
-# largest value that stays in range, and how often this bites is logged per year below.
-load("dat/Kernel-fits_truncated.RData") # brings `fits` back into scope (setup() only loads it into its own local frame)
-max.kernel.index <- nrow(fits)
-max.rain.days <- max((0:365)[rain_to_days(0:365) <= max.kernel.index])
-cat("Actual rain-days values above", max.rain.days, "/season will be clipped (kernel-fits table has",
-    max.kernel.index, "rows)\n")
-
-######## second simulation loop: actual (per-year, per-point) rainfall scenario ########
-# Mirrors the static-rainfall loop above, but must rebuild spread.table/pairs (via a
-# fresh setup() call) every year, since the kernel now varies by year -- unlike the
-# static-rainfall loop, which safely reuses one spread.table/pairs built once outside
-# the loop because rainfall never changed there.
+######## PER-YEAR SCENARIO: each season's actual Nov-May rainy days ########
+# How much of the empirical/null discrepancy is real inter-annual rainfall? The kernel now varies
+# by year, so setup() rebuilds spread.table/pairs each year from that season's rainy days per cell
+# (rain.years$cell.year), with one kernel (the season's own rain, not an extreme switch).
 null.results.actual.rain <- vector("list", length(sim.years))
-
 for (tt in seq_along(sim.years)) {
-  yr <- sim.years[tt]
-  cat("\n==== [actual rainfall] Year", yr, "====\n")
-
-  ######## this year's actual rain-days per point, clipped, joined onto all.points ########
-  yr.rain.days <- rain.days.by.cell.year |> filter(year == yr) |> select(silo_cell, rain.days)
-  all.points.yr <- all.points |>
-    left_join(yr.rain.days, by = "silo_cell") |>
-    mutate(rainfall = pmin(rain.days, max.rain.days))
-  # the join must not change row count/order -- present_k below is indexed by all.points row,
-  # so a duplicated silo_cell key would silently misalign colonisation state against geometry
-  stopifnot(nrow(all.points.yr) == nrow(all.points))
-
-  n.missing <- sum(is.na(all.points.yr$rainfall))
-  if (n.missing > 0) {
-    cat("  Warning:", n.missing, "points had no SILO data for this wet season; falling back to climatological rainfall\n")
-    all.points.yr$rainfall[is.na(all.points.yr$rainfall)] <- all.points$rainfall[is.na(all.points.yr$rainfall)]
-  }
-  n.clipped <- sum(yr.rain.days$rain.days > max.rain.days, na.rm = TRUE)
-  if (n.clipped > 0) cat("  Note:", n.clipped, "point-years clipped to", max.rain.days, "rain-days (kernel-fits table range)\n")
-
-  ######## rebuild spread table + dispersal matrix for this year's actual rainfall ########
-  setup(point.data = all.points.yr,
+  cat("\n==== [actual rainfall] Year", sim.years[tt], "( season", season.of[tt], ") ====\n")
+  cy <- rain.years$cell.year |> filter(season.year == season.of[tt])
+  all.points$rain.season <- cy$rain.days[match(rain.years$point.cell, cy$silo_cell)]
+  stopifnot(!anyNA(all.points$rain.season))
+  cat("  Mean Nov-May rainy days:", round(mean(all.points$rain.season), 1),
+      "(reference mean", round(mean(all.points$rain.mean), 1), ")\n")
+  setup(point.data = all.points,
         X.id = "X",
         Y.id = "Y",
         present.id = "present_k",
-        artificial.natural.id = "origin_des",
-        rain.id = "rainfall",
+        artificial.natural.id = "art_nat",
+        rain.id = "rain.season",
         constant.rain = NULL,
         trunc.dist = TRUE,
-        TCZ = FALSE,
-        season.days = 365) # all-year rainy-day counts: frozen at the old mapping until Phase 2
-
-  # this year's own kept.ids -- not reused from the static-rainfall loop above, since
-  # this is a fresh setup() call (dedup only depends on X/Y/threshold so in practice
-  # it will match, but recomputing costs nothing and removes the need to assume that)
-  kept.ids.yr <- spread.table[, "ID"]
-
-  ######## starting colonisation state for this year (identical logic to the static loop) ########
-  present_k_full <- ifelse(!is.na(all.points$colonisation_year) &
-                              all.points$colonisation_year <= yr, 1L, 0L)
-  present_k <- present_k_full[kept.ids.yr]
-  spread.table[, "Pres"] <- present_k
-  spread.table[, "age"] <- present_k
-  spread.table[, "occ.years"] <- present_k
-  spread.table[, "first.col.gen"] <- ifelse(present_k == 1, 0, NA_real_)
-
-  ######## sanity check: threshold-fit should recover ~b_k from the (deterministic) starting state ########
-  b_k <- b_metres(tt)
-  in.bbox0 <- spread.table[, "X"] >= bbox.fit["xmin"] & spread.table[, "X"] <= bbox.fit["xmax"] &
-    spread.table[, "Y"] >= bbox.fit["ymin"] & spread.table[, "Y"] <= bbox.fit["ymax"]
-  D0 <- spread.table[, "Y"] - a * (spread.table[, "X"] - mean.coord_m["X"])
-  b0.check <- fit_b_threshold(D0[in.bbox0], spread.table[in.bbox0, "Pres"])
-  cat("  Sanity check: b recovered from starting state =", round(b0.check),
-      "m vs fitted b_k =", round(b_k), "m (diff =", round(b0.check - b_k), "m)\n")
-
-  ######## run one generation (= one wet season) forward, many reps ########
-  sim_out <- run_sims(n.sims = n.sims, gens = 1, plot = FALSE, rollup = FALSE,
-                       stop.on.target = FALSE)
-
-  ######## fit b_sim per rep, restricted to the empirical fitting bbox ########
-  disp.sim.km <- vapply(sim_out, function(rep) {
-    pm <- rep$popmatrix
-    in.bbox <- pm[, "X"] >= bbox.fit["xmin"] & pm[, "X"] <= bbox.fit["xmax"] &
-      pm[, "Y"] >= bbox.fit["ymin"] & pm[, "Y"] <= bbox.fit["ymax"]
-    pm <- pm[in.bbox, , drop = FALSE]
-    D <- pm[, "Y"] - a * (pm[, "X"] - mean.coord_m["X"])
-    b_sim <- fit_b_threshold(D, pm[, "Pres"])
-    (b_sim - b_k) / sqrt(1 + a^2) / 1000 # metres -> km; signed, same convention as empirical delta
-  }, numeric(1))
-
-  n.degenerate <- sum(is.na(disp.sim.km))
-  if (n.degenerate > 0) {
-    cat("  Warning:", n.degenerate, "of", n.sims, "reps had no separating threshold in bbox.fit (dropped)\n")
-  }
-
-  disp.emp.km <- post.samples[, paste0("delta[", tt, "]")]
-
-  null.results.actual.rain[[tt]] <- list(year = yr,
-                                          sim = disp.sim.km,
-                                          empirical = disp.emp.km,
-                                          n.degenerate = n.degenerate,
-                                          n.sims = n.sims,
-                                          n.clipped = n.clipped,
-                                          n.missing.silo = n.missing)
+        TCZ = FALSE)
+  null.results.actual.rain[[tt]] <- simulate_year(tt)
+  null.results.actual.rain[[tt]]$mean.rain.days <- mean(all.points$rain.season)
 }
 names(null.results.actual.rain) <- sim.years
 
 ######## combine both scenarios with empirical into one three-way comparison ########
-comparison.df.actual <- do.call(rbind, lapply(null.results.actual.rain, function(x) {
-  data.frame(year = x$year, source = "simulated (actual rainfall)",
-             distance_km = abs(x$sim[!is.na(x$sim)]))
-}))
-
-comparison.df.all <- rbind(comparison.df, comparison.df.actual)
+comparison.df.all <- do.call(rbind, c(
+  lapply(null.results, function(x) rbind(
+    data.frame(year = x$year, source = "empirical", distance_km = abs(x$empirical)),
+    data.frame(year = x$year, source = "simulated (null)", distance_km = abs(x$sim[!is.na(x$sim)])))),
+  lapply(null.results.actual.rain, function(x)
+    data.frame(year = x$year, source = "simulated (actual rainfall)", distance_km = abs(x$sim[!is.na(x$sim)])))))
 comparison.df.all$source <- factor(comparison.df.all$source,
-                                    levels = c("empirical", "simulated (null)", "simulated (actual rainfall)"))
+                                   levels = c("empirical", "simulated (null)", "simulated (actual rainfall)"))
+
+# per year: medians, and where the empirical median falls in each simulated distribution
+summary.df <- do.call(rbind, lapply(seq_along(sim.years), function(tt) {
+  emp <- median(abs(null.results[[tt]]$empirical))
+  st <- abs(na.omit(null.results[[tt]]$sim)); ac <- abs(na.omit(null.results.actual.rain[[tt]]$sim))
+  data.frame(year = sim.years[tt], season.year = season.of[tt], extreme = extreme.of[tt],
+             empirical.median.km = emp,
+             static.median.km = median(st), static.emp.pctile = mean(st <= emp),
+             actual.median.km = median(ac), actual.emp.pctile = mean(ac <= emp),
+             actual.mean.rain.days = null.results.actual.rain[[tt]]$mean.rain.days)
+}))
+print(summary.df, digits = 3)
 
 dir.create("out/null-model", showWarnings = FALSE)
-save(null.results, null.results.actual.rain, comparison.df.all,
+write.csv(summary.df, "out/null-model/front-displacement-summary.csv", row.names = FALSE)
+save(null.results, null.results.actual.rain, comparison.df.all, summary.df,
      file = "out/null-model/front-displacement-null-vs-empirical-vs-actual-rainfall.RData")
 
 print(
@@ -533,13 +345,10 @@ print(
 )
 ggsave("out/null-model/front-displacement-three-way.pdf", width = 180, height = 120, units = "mm")
 
-######## degenerate-rep and clipping summary across all years (actual-rainfall scenario) ########
-degen.actual <- vapply(null.results.actual.rain, `[[`, numeric(1), "n.degenerate")
-if (any(degen.actual > 0)) {
-  cat("\n[actual rainfall] Degenerate (whole-bbox-one-sided) reps by year:\n")
-  print(setNames(degen.actual, sim.years))
+######## degenerate-rep summary across all years ########
+degen <- rbind(static = vapply(null.results, `[[`, numeric(1), "n.degenerate"),
+               actual = vapply(null.results.actual.rain, `[[`, numeric(1), "n.degenerate"))
+if (any(degen > 0)) {
+  cat("\nDegenerate (whole-bbox-one-sided) reps by year:\n")
+  print(degen)
 }
-clipped.actual <- vapply(null.results.actual.rain, `[[`, numeric(1), "n.clipped")
-cat("\n[actual rainfall] Point-years clipped to kernel-fits range, by year:\n")
-print(setNames(clipped.actual, sim.years))
-

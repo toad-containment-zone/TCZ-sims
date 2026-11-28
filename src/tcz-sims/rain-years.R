@@ -138,3 +138,15 @@ rain_years <- function(points, cache = silo.tcz.cache) {
        point.rain.days.max = pts$rain.days.max,
        point.rain.days.mean = pts$rain.days.mean)
 }
+
+# The shared SILO kernel inputs (docs/roadmap.md, "One calibration and model structure"): adds each
+# point's mean (`rain.mean`, the standard kernel) and maximum (`rain.extreme`, the extreme kernel)
+# Nov-May rainy days over the reference years. Used by tcz-setup.R, forecast.R and the null model,
+# which then pass rain.id = "rain.mean", rain.extreme.id = "rain.extreme" to setup().
+attach_silo_kernels <- function(points, cache = silo.tcz.cache) {
+  ry <- rain_years(points, cache = cache)
+  points$rain.mean <- ry$point.rain.days.mean
+  points$rain.extreme <- ry$point.rain.days.max
+  stopifnot(!anyNA(points$rain.mean), !anyNA(points$rain.extreme))
+  list(points = points, rain.years = ry)
+}
